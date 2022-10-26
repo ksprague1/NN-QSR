@@ -60,7 +60,7 @@ class Hamiltonian():
         
         mat=np.zeros([self.L,self.L])
         
-        Vij[(1,1),(Lx,Ly)](Lx,Ly,self.R,self.V,mat)
+        Vij[(2,2),(Lx//2,Ly//2)](Lx,Ly,self.R,self.V,mat)
         with torch.no_grad():
             self.Vij.weight[:,:]=torch.Tensor(mat)
             self.Vij.bias.fill_(-self.delta)
@@ -184,7 +184,12 @@ class Sampler(nn.Module):
         #compute all of their logscale probabilities
         if not grad:
             with torch.no_grad():
-                probs = self.logprobability(sflip.view([B*L,L,1]))
+                probs=torch.zeros([B*L],device=self.device)
+                D=4
+                tmp=sflip.view([B*L,L,1])
+                for k in range(D):
+                    probs[k*B*L//D:(k+1)*B*L//D] = self.logprobability(tmp[k*B*L//D:(k+1)*B*L//D])
+
         else:
             probs = self.logprobability(sflip.view([B*L,L,1]))
 
@@ -377,7 +382,7 @@ N = Lx*Ly   # Total number of atoms
 V = 7.0     # Strength of Van der Waals interaction
 Omega = 1.0 # Rabi frequency
 delta = 1.0 # Detuning 
-exact_energy = {16:-0.45776822,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052}[Lx*Ly]
+exact_energy = {16:-0.45776822,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.36,1024:-0.34,2304:-0.3}[Lx*Ly]
 print(exact_energy)
 
 h = Hamiltonian(Lx,Ly,V,Omega,delta)
@@ -404,7 +409,11 @@ print(Lx,Ly,N,M)
 
 
 bsize=512
-BlockNum=(Lx*Ly)//8
+
+#BlockNum=(Lx*Ly)//8
+
+#changed this only for 48x48
+BlockNum=512
 
 BbyL=bsize//BlockNum
 
@@ -443,9 +452,10 @@ def fill_queue():
             sump_queue[i*BbyL:(i+1)*BbyL]=sump
             sqrtp_queue[i*BbyL:(i+1)*BbyL]=sqrtp
             lp_queue[i*BbyL:(i+1)*BbyL] = lp
-
+            
+t=time.time()
 fill_queue()
-print(Eo_queue.mean().item())
+print(Eo_queue.mean().item(),"%.1f"%(time.time()-t))
             
 if not USEQUEUE:
     nqueue_updates = BlockNum
