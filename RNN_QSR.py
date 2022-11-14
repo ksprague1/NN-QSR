@@ -159,6 +159,7 @@ class Rydberg(Hamiltonian):
 
 
 class TFIM(Hamiltonian):
+    En1={40:-1.2642,500:-1.2725,100:-1.2696 ,1000:-1.2729}
     def __init__(self,L,h_x,J=1.0,device=device):
         self.J = J
         super(TFIM,self).__init__(L,h_x,device)
@@ -179,7 +180,10 @@ class TFIM(Hamiltonian):
     def localenergyALT(self,samples,logp,sumsqrtp,logsqrtp):
         return super(TFIM,self).localenergyALT(2*samples-1,logp,sumsqrtp,logsqrtp)
     def ground(self):
-        return -1
+        if self.J==1 and self.offDiag==-1:
+            if self.L in TFIM.En1:
+                return TFIM.En1[self.L]
+        return -10
 
 
 
@@ -610,8 +614,9 @@ def queue_train(op):
     DEBUG = np.array(debug)
     import os
 
-    mydir="out/%s-%d-M=%.3f-B=%d-K=%d"%(op.hamiltonian,op.L,op.M,op.B,op.K)
-
+    mydir="out/%s/%d-M=%.3f-B=%d-K=%d"%(op.hamiltonian,op.L,op.M,op.B,op.K)
+    if op.hamiltonian == "TFIM":
+        mydir+=("-h=%.1f"%op.h)
     try:
         os.mkdir(mydir)
     except:pass
