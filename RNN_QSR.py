@@ -453,10 +453,11 @@ class Opt:
                 kwargs[key]=self.sus_cast(val)
             except:pass
         self.__dict__.update(kwargs)
-    def sus_cast(self,x):
+    def sus_cast(self,x0):
         try:
-            x=float(x)
-            x=int(x)
+            x=x0
+            x=float(x0)
+            x=int(x0)
         except:return x
         return x
 
@@ -621,7 +622,7 @@ def queue_train(op):
         np.save(mydir+"/DEBUG",DEBUG)
 
 import sys
-
+print(sys.argv[1:])
 op=Opt()
 op.apply(sys.argv[1:])
 op.B=op.K*op.Q
