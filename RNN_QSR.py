@@ -626,11 +626,104 @@ def queue_train(op):
         torch.save(samplernn,mydir+"/S")
         np.save(mydir+"/DEBUG",DEBUG)
 
+def reg_train(op):
+
+    trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
+
+    # Hamiltonian parameters
+    N = op.L   # Total number of atoms
+    V = 7.0     # Strength of Van der Waals interaction
+    Omega = 1.0 # Rabi frequency
+    delta = 1.0 # Detuning 
+
+    if op.hamiltonian=="Rydberg":
+        Lx=Ly=int(op.L**0.5)
+        op.L=Lx*Ly
+        h = Rydberg(Lx,Ly,V,Omega,delta)
+    else:
+        #hope for the best here since there aren't defaults
+        h = TFIM(op.L,op.h,op.J)
+    exact_energy = h.ground()
+    print(exact_energy,op.L)
+
+    debug=[]
+    losses=[]
+    true_energies=[]
+
+    # In[17]:
+
+    samplequeue = torch.zeros([op.B,op.L,1],device=device)
+    sump_queue=torch.zeros([op.B],device=device)
+    sqrtp_queue=torch.zeros([op.B],device=device)
+
+    def fill_queue():
+        for i in range(op.Q):
+            sample,sump,sqrtp = trainrnn.sample_with_labelsALT(op.K,op.L,grad=False,nloops=op.NLOOPS)
+            samplequeue[i*op.K:(i+1)*op.K]=sample
+            sump_queue[i*op.K:(i+1)*op.K]=sump
+            sqrtp_queue[i*op.K:(i+1)*op.K]=sqrtp
+    i=0
+    t=time.time()
+    for x in range(op.steps):
+        
+        #gather samples
+        fill_queue()
+        # get probability labels
+        logp=trainrnn.logprobability(samplequeue)
+
+        #obtain energy
+        with torch.no_grad():
+            E=h.localenergyALT(samplequeue,logp,sump_queue,sqrtp_queue)
+            #energy mean and variance
+            Ev,Eo=torch.var_mean(E)
+
+        ERR  = Eo/(op.L)
+        loss = (E*logp - Eo*logp).mean()
+
+        #Main loss curve to follow
+        losses.append(ERR.cpu().item())
+
+        #update weights
+        trainrnn.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # many repeat values but it keeps the same format as no queue
+        debug+=[[Ev.item()**0.5,Eo.item(),Ev.item()**0.5,Eo.item(),loss.item(),Eo.item(),0,time.time()-t]]
+
+        if x%500==0:
+            print(int(time.time()-t),end=",%.2f|"%(losses[-1]))
+    print(time.time()-t,x+1)
+
+    # In[18]:
+
+
+    DEBUG = np.array(debug)
+    import os
+
+    mydir="out/%s/%d-NoQ-B=%d-K=%d"%(op.hamiltonian,op.L,op.B,op.K)
+    if op.hamiltonian == "TFIM":
+        mydir+=("-h=%.1f"%op.h)
+    try:
+        os.mkdir(mydir)
+    except:pass
+    if True:
+        #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
+        torch.save(trainrnn,mydir+"/T")
+        #torch.save(samplernn,mydir+"/S")
+        np.save(mydir+"/DEBUG",DEBUG)
+        
+        
+        
+        
 import sys
 print(sys.argv[1:])
 op=Opt()
 op.apply(sys.argv[1:])
 op.B=op.K*op.Q
 print(op)
-    
-queue_train(op)
+
+if op.USEQUEUE:
+    queue_train(op)
+else:
+    reg_train(op)
