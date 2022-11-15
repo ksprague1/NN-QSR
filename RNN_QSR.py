@@ -104,8 +104,8 @@ class Hamiltonian():
 
 # In[3]:
 
-
-help(Hamiltonian)
+if __name__=="__main__":
+    help(Hamiltonian)
 
 
 # In[4]:
@@ -159,7 +159,7 @@ class Rydberg(Hamiltonian):
 
 
 class TFIM(Hamiltonian):
-    En1={40:-1.2642,500:-1.2725,100:-1.2696 ,1000:-1.2729}
+    En1={10:-1.2381,40:-1.2642,500:-1.2725,100:-1.2696 ,1000:-1.2729}
     def __init__(self,L,h_x,J=1.0,device=device):
         self.J = J
         super(TFIM,self).__init__(L,h_x,device)
@@ -269,15 +269,15 @@ class Sampler(nn.Module):
 
 # In[7]:
 
+if __name__=="__main__":
+    import pydoc
 
-import pydoc
-
-#help function prints too much stuff so I'm getting the info and removing the unimportant bits
-documentation = pydoc.text.document(Sampler, "").split("--------")[0]
-out= documentation.split("Base class for all neural network modules")[0]+documentation.split("builtins.object")[1]
-toprint,i=out[0],1
-while i<len(out):toprint+= out[i] if (out[i]!= "\x08" and out[i-1] != "\x08") else "";i+=1
-print(toprint)
+    #help function prints too much stuff so I'm getting the info and removing the unimportant bits
+    documentation = pydoc.text.document(Sampler, "").split("--------")[0]
+    out= documentation.split("Base class for all neural network modules")[0]+documentation.split("builtins.object")[1]
+    toprint,i=out[0],1
+    while i<len(out):toprint+= out[i] if (out[i]!= "\x08" and out[i-1] != "\x08") else "";i+=1
+    print(toprint)
 
 
 # # Simple RNN to start
@@ -715,15 +715,15 @@ def reg_train(op):
         
         
         
-        
-import sys
-print(sys.argv[1:])
-op=Opt()
-op.apply(sys.argv[1:])
-op.B=op.K*op.Q
-print(op)
+if __name__=="__main__":        
+    import sys
+    print(sys.argv[1:])
+    op=Opt()
+    op.apply(sys.argv[1:])
+    op.B=op.K*op.Q
+    print(op)
 
-if op.USEQUEUE:
-    queue_train(op)
-else:
-    reg_train(op)
+    if op.USEQUEUE:
+        queue_train(op)
+    else:
+        reg_train(op)
