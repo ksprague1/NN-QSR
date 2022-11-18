@@ -569,7 +569,10 @@ def queue_train(op):
 
         ERR  = Eo/(op.L)
 
-        loss = (E*logp - Eo*logp).mean()
+        if B==1:
+            loss = (E*logp).mean()
+        else:
+            loss = (E*logp - Eo*logp).mean()
 
         #Main loss curve to follow
         losses.append(ERR.cpu().item())
