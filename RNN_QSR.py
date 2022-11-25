@@ -435,9 +435,10 @@ class Opt:
     NLOOPS (int)   -- This saves ram at the cost of more runtime.
     hamiltonian (string) -- Which hamiltonian to train on
     steps (int) -- Number of training steps
+    dir (str) -- Output directory, set to <NONE> for no output
     """
     DEFAULTS={'L':16,'Q':32,'K':16,'B':32*16,'TOL':0.15,'M':31/32,'USEQUEUE':True,'NLOOPS':1,
-              "hamiltonian":"Rydberg","steps": 12000}
+              "hamiltonian":"Rydberg","steps": 12000,"dir":"out"}
     def __init__(self,**kwargs):
         self.__dict__.update(Opt.DEFAULTS)
         self.__dict__.update(kwargs)
@@ -467,14 +468,44 @@ class Opt:
 
 
 # In[14]:
+import os
+def mkdir(dir_):
+    try:
+        os.mkdir(dir_)
+    except:return -1
+    return 0
 
+def setup_dir(op):
+    """Makes directory for output and saves the run settings there
+    Inputs: 
+        op (Opt) - Options object
+    Outputs:
+        Output directory mydir
+    
+    """
+    if op.dir!="<NONE>":
+        if op.USEQUEUE:
+            mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d"%(op.hamiltonian,op.L,op.M,op.B,op.K)
+        else:
+            mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d"%(op.hamiltonian,op.L,op.B,op.K)
+    if op.hamiltonian == "TFIM":
+        mydir+=("-h=%.1f"%op.h)
+    mkdir(op.dir)
+    mkdir(op.dir+"/%s"%op.hamiltonian)
+    mkdir(mydir)
 
-
+    with open(mydir+"/settings.txt","w") as f:
+        f.write(str(op)+"\n")
+    print("Output folder path established")
+    return mydir
 
 
 
 def queue_train(op):
 
+    
+    mydir = setup_dir(op)
+    
     trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
     samplernn = RNN(rnntype="GRU",Nh=128)
     for target_param in samplernn.parameters():
@@ -569,7 +600,7 @@ def queue_train(op):
 
         ERR  = Eo/(op.L)
 
-        if B==1:
+        if op.B==1:
             loss = (E*logp).mean()
         else:
             loss = (E*logp - Eo*logp).mean()
@@ -615,15 +646,9 @@ def queue_train(op):
 
 
     DEBUG = np.array(debug)
-    import os
-
-    mydir="out/%s/%d-M=%.3f-B=%d-K=%d"%(op.hamiltonian,op.L,op.M,op.B,op.K)
-    if op.hamiltonian == "TFIM":
-        mydir+=("-h=%.1f"%op.h)
-    try:
-        os.mkdir(mydir)
-    except:pass
-    if True:
+    
+    
+    if op.dir!="<NONE>":
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
         torch.save(trainrnn,mydir+"/T")
         torch.save(samplernn,mydir+"/S")
@@ -631,6 +656,9 @@ def queue_train(op):
 
 def reg_train(op):
 
+
+    mydir = setup_dir(op)
+    
     trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
 
     # Hamiltonian parameters
@@ -681,7 +709,12 @@ def reg_train(op):
             Ev,Eo=torch.var_mean(E)
 
         ERR  = Eo/(op.L)
-        loss = (E*logp - Eo*logp).mean()
+        
+        
+        if op.B==1:
+            loss = (E*logp).mean()
+        else:
+            loss = (E*logp - Eo*logp).mean()
 
         #Main loss curve to follow
         losses.append(ERR.cpu().item())
@@ -704,13 +737,7 @@ def reg_train(op):
     DEBUG = np.array(debug)
     import os
 
-    mydir="out/%s/%d-NoQ-B=%d-K=%d"%(op.hamiltonian,op.L,op.B,op.K)
-    if op.hamiltonian == "TFIM":
-        mydir+=("-h=%.1f"%op.h)
-    try:
-        os.mkdir(mydir)
-    except:pass
-    if True:
+    if op.dir!="<NONE>":
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
         torch.save(trainrnn,mydir+"/T")
         #torch.save(samplernn,mydir+"/S")
@@ -725,7 +752,6 @@ if __name__=="__main__":
     op.apply(sys.argv[1:])
     op.B=op.K*op.Q
     print(op)
-
     if op.USEQUEUE:
         queue_train(op)
     else:
