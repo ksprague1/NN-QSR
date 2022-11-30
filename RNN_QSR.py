@@ -104,7 +104,7 @@ class Hamiltonian():
 
 # In[3]:
 
-if __name__=="__main__":
+if __name__=="__main__sussy":
     help(Hamiltonian)
 
 
@@ -269,7 +269,7 @@ class Sampler(nn.Module):
 
 # In[7]:
 
-if __name__=="__main__":
+if __name__=="__main__sussy":
     import pydoc
 
     #help function prints too much stuff so I'm getting the info and removing the unimportant bits
@@ -501,13 +501,18 @@ def setup_dir(op):
 
 
 
-def queue_train(op):
+def queue_train(op,to=None):
 
-    
     mydir = setup_dir(op)
     
-    trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
-    samplernn = RNN(rnntype="GRU",Nh=128)
+    if type(to)==type(None):
+        trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
+        samplernn = RNN(rnntype="GRU",Nh=128)
+    else:
+        trainrnn,samplernn,optimizer=to
+    
+    
+    
     for target_param in samplernn.parameters():
         target_param.data.copy_(target_param.data*5)
     momentum_update(0.0,samplernn,trainrnn)
@@ -654,13 +659,15 @@ def queue_train(op):
         torch.save(samplernn,mydir+"/S")
         np.save(mydir+"/DEBUG",DEBUG)
 
-def reg_train(op):
+def reg_train(op,to=None):
 
 
     mydir = setup_dir(op)
     
-    trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
-
+    if type(to)==type(None):
+        trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
+    else:
+        trainrnn,optimizer=to
     # Hamiltonian parameters
     N = op.L   # Total number of atoms
     V = 7.0     # Strength of Van der Waals interaction
