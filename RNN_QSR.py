@@ -295,12 +295,12 @@ class RNN(Sampler):
         
         
         self.lin = nn.Sequential(
-                nn.Linear(128,128),
+                nn.Linear(Nh,Nh),
                 nn.ReLU(),
-                nn.Linear(128,1),
+                nn.Linear(Nh,1),
                 nn.Sigmoid()
             )
-        
+        self.Nh=Nh
         self.rnntype=rnntype
         self.to(device)
     def forward(self, input):
@@ -308,11 +308,11 @@ class RNN(Sampler):
         # h0 has shape [1,B,H]
         
         if self.rnntype=="LSTM":
-            h0=[torch.zeros([1,input.shape[0],128],device=self.device),
-               torch.zeros([1,input.shape[0],128],device=self.device)]
+            h0=[torch.zeros([1,input.shape[0],self.Nh],device=self.device),
+               torch.zeros([1,input.shape[0],self.Nh],device=self.device)]
             #h0 and c0
         else:
-            h0=torch.zeros([1,input.shape[0],128],device=self.device)
+            h0=torch.zeros([1,input.shape[0],self.Nh],device=self.device)
         out,h=self.rnn(input,h0)
         return self.lin(out)
     
@@ -358,11 +358,11 @@ class RNN(Sampler):
             samples - [B,L,1] matrix of zeros and ones for ground/excited states
         """
         if self.rnntype=="LSTM":
-            h=[torch.zeros([1,B,128],device=self.device),
-               torch.zeros([1,B,128],device=self.device)]
+            h=[torch.zeros([1,B,self.Nh],device=self.device),
+               torch.zeros([1,B,self.Nh],device=self.device)]
             #h is h0 and c0
         else:
-            h=torch.zeros([1,B,128],device=self.device)
+            h=torch.zeros([1,B,self.Nh],device=self.device)
         #Sample set will have shape [N,L,1]
         #need one extra zero batch at the start for first pred hence input is [N,L+1,1] 
         input = torch.zeros([B,L+1,1],device=self.device)
@@ -436,9 +436,10 @@ class Opt:
     hamiltonian (string) -- Which hamiltonian to train on
     steps (int) -- Number of training steps
     dir (str) -- Output directory, set to <NONE> for no output
+    Nh (int) -- RNN hidden size
     """
     DEFAULTS={'L':16,'Q':32,'K':16,'B':32*16,'TOL':0.15,'M':31/32,'USEQUEUE':True,'NLOOPS':1,
-              "hamiltonian":"Rydberg","steps": 12000,"dir":"out"}
+              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128}
     def __init__(self,**kwargs):
         self.__dict__.update(Opt.DEFAULTS)
         self.__dict__.update(kwargs)
@@ -506,8 +507,8 @@ def queue_train(op,to=None):
     mydir = setup_dir(op)
     
     if type(to)==type(None):
-        trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
-        samplernn = RNN(rnntype="GRU",Nh=128)
+        trainrnn,optimizer=new_rnn_with_optim("GRU",op.Nh,lr=1e-3)
+        samplernn = RNN(rnntype="GRU",Nh=op.Nh)
     else:
         trainrnn,samplernn,optimizer=to
     
@@ -665,7 +666,7 @@ def reg_train(op,to=None):
     mydir = setup_dir(op)
     
     if type(to)==type(None):
-        trainrnn,optimizer=new_rnn_with_optim("GRU",128,lr=1e-3)
+        trainrnn,optimizer=new_rnn_with_optim("GRU",op.Nh,lr=1e-3)
     else:
         trainrnn,optimizer=to
     # Hamiltonian parameters
