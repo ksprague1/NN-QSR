@@ -439,7 +439,7 @@ class Opt:
     Nh (int) -- RNN hidden size
     """
     DEFAULTS={'L':16,'Q':32,'K':16,'B':32*16,'TOL':0.15,'M':31/32,'USEQUEUE':True,'NLOOPS':1,
-              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128}
+              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128,"lr":1e-3}
     def __init__(self,**kwargs):
         self.__dict__.update(Opt.DEFAULTS)
         self.__dict__.update(kwargs)
@@ -666,7 +666,7 @@ def reg_train(op,to=None):
     mydir = setup_dir(op)
     
     if type(to)==type(None):
-        trainrnn,optimizer=new_rnn_with_optim("GRU",op.Nh,lr=1e-3)
+        trainrnn,optimizer=new_rnn_with_optim("GRU",op.Nh,lr=op.lr)
     else:
         trainrnn,optimizer=to
     # Hamiltonian parameters
