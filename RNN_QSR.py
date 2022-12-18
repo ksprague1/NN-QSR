@@ -661,6 +661,8 @@ def queue_train(op,to=None):
         np.save(mydir+"/DEBUG",DEBUG)
   except KeyboardInterrupt:
     if op.dir!="<NONE>":
+        import os
+        DEBUG = np.array(debug)
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
         torch.save(trainrnn,mydir+"/T")
         torch.save(samplernn,mydir+"/S")
@@ -748,9 +750,9 @@ def reg_train(op,to=None):
 
     # In[18]:
 
-
-    DEBUG = np.array(debug)
     import os
+    DEBUG = np.array(debug)
+    
 
     if op.dir!="<NONE>":
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
@@ -759,6 +761,8 @@ def reg_train(op,to=None):
         np.save(mydir+"/DEBUG",DEBUG)
   except KeyboardInterrupt:
     if op.dir!="<NONE>":
+        import os
+        DEBUG = np.array(debug)
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
         torch.save(trainrnn,mydir+"/T")
         #torch.save(samplernn,mydir+"/S")
