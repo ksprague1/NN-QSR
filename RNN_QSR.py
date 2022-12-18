@@ -486,9 +486,9 @@ def setup_dir(op):
     """
     if op.dir!="<NONE>":
         if op.USEQUEUE:
-            mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d"%(op.hamiltonian,op.L,op.M,op.B,op.K)
+            mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d-Nh=%d"%(op.hamiltonian,op.L,op.M,op.B,op.K,op.Nh)
         else:
-            mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d"%(op.hamiltonian,op.L,op.B,op.K)
+            mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d-Nh=%d"%(op.hamiltonian,op.L,op.B,op.K,op.Nh)
     if op.hamiltonian == "TFIM":
         mydir+=("-h=%.1f"%op.h)
     mkdir(op.dir)
@@ -503,7 +503,7 @@ def setup_dir(op):
 
 
 def queue_train(op,to=None):
-
+  try:
     mydir = setup_dir(op)
     
     if type(to)==type(None):
@@ -659,9 +659,16 @@ def queue_train(op,to=None):
         torch.save(trainrnn,mydir+"/T")
         torch.save(samplernn,mydir+"/S")
         np.save(mydir+"/DEBUG",DEBUG)
+  except KeyboardInterrupt:
+    if op.dir!="<NONE>":
+        #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
+        torch.save(trainrnn,mydir+"/T")
+        torch.save(samplernn,mydir+"/S")
+        np.save(mydir+"/DEBUG",DEBUG)
+    
 
 def reg_train(op,to=None):
-
+  try:
 
     mydir = setup_dir(op)
     
@@ -750,7 +757,12 @@ def reg_train(op,to=None):
         torch.save(trainrnn,mydir+"/T")
         #torch.save(samplernn,mydir+"/S")
         np.save(mydir+"/DEBUG",DEBUG)
-        
+  except KeyboardInterrupt:
+    if op.dir!="<NONE>":
+        #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
+        torch.save(trainrnn,mydir+"/T")
+        #torch.save(samplernn,mydir+"/S")
+        np.save(mydir+"/DEBUG",DEBUG)
         
         
 if __name__=="__main__":        
