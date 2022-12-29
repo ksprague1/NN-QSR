@@ -132,7 +132,7 @@ def Vij(Ly,Lx,Rcutoff,V,matrix):
 
 class Rydberg(Hamiltonian):
     E={16:-0.45776822,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687}
-    def __init__(self,Lx,Ly,V,Omega,delta,R=2.01,device=device):
+    def __init__(self,Lx,Ly,V,Omega,delta,R=1000.0,device=device):
         self.Lx       = Lx              # Size along x
         self.Ly       = Ly              # Size along y
         self.V        = V               # Van der Waals potential
@@ -437,9 +437,10 @@ class Opt:
     steps (int) -- Number of training steps
     dir (str) -- Output directory, set to <NONE> for no output
     Nh (int) -- RNN hidden size
+    kl (float >=0) -- loss term for kl divergence
     """
     DEFAULTS={'L':16,'Q':32,'K':16,'B':32*16,'TOL':0.15,'M':31/32,'USEQUEUE':True,'NLOOPS':1,
-              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128,"lr":1e-3}
+              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128,"lr":1e-3,"kl":0.0}
     def __init__(self,**kwargs):
         self.__dict__.update(Opt.DEFAULTS)
         self.__dict__.update(kwargs)
@@ -450,6 +451,12 @@ class Opt:
             line=key+" "*(30-len(key))+ "\t"*3+str(self.__dict__[key])
             out+=line+"\n"
         return out
+    def cmd(self):
+        out=""
+        for key in self.__dict__:
+            line=key+"="+str(self.__dict__[key])
+            out+=line+" "
+        return out[:-1]
     
     def apply(self,args):
         kwargs = dict()
@@ -486,15 +493,23 @@ def setup_dir(op):
     """
     if op.dir!="<NONE>":
         if op.USEQUEUE:
-            mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d-Nh=%d"%(op.hamiltonian,op.L,op.M,op.B,op.K,op.Nh)
+            mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d-Nh=%d-kl=%.2f"%(op.hamiltonian,op.L,op.M,op.B,op.K,op.Nh,op.kl)
         else:
-            mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d-Nh=%d"%(op.hamiltonian,op.L,op.B,op.K,op.Nh)
+            mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d-Nh=%d-kl=%.2f"%(op.hamiltonian,op.L,op.B,op.K,op.Nh,op.kl)
     if op.hamiltonian == "TFIM":
         mydir+=("-h=%.1f"%op.h)
     mkdir(op.dir)
     mkdir(op.dir+"/%s"%op.hamiltonian)
     mkdir(mydir)
-
+    biggest=-1
+    for paths,folders,files in os.walk(mydir):
+        for f in folders:
+            try:biggest=max(biggest,int(f))
+            except:pass
+            
+    mydir+="/"+str(biggest+1)
+    mkdir(mydir)
+        
     with open(mydir+"/settings.txt","w") as f:
         f.write(str(op)+"\n")
     print("Output folder path established")
@@ -607,9 +622,16 @@ def queue_train(op,to=None):
         ERR  = Eo/(op.L)
 
         if op.B==1:
-            loss = (E*logp).mean()
+            loss = ((E-op.kl)*logp).mean()
         else:
-            loss = (E*logp - Eo*logp).mean()
+            #loss = (E*logp - Eo*logp).mean()
+            loss = (E*logp - (Eo+op.kl)*logp).mean()
+            
+        #KL divergence is Sum(Q(x)[ln(Q(x))-ln(P(x))]) == E_q[-ln(Q/P)]
+        #this can be minimized just by setting -ln(P) as a loss term
+        
+        
+        
 
         #Main loss curve to follow
         losses.append(ERR.cpu().item())
@@ -729,9 +751,10 @@ def reg_train(op,to=None):
         
         
         if op.B==1:
-            loss = (E*logp).mean()
+            loss = ((E-op.kl)*logp).mean()
         else:
-            loss = (E*logp - Eo*logp).mean()
+            #loss = (E*logp - Eo*logp).mean()
+            loss = (E*logp - (Eo+op.kl)*logp).mean()
 
         #Main loss curve to follow
         losses.append(ERR.cpu().item())
