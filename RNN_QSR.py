@@ -213,7 +213,6 @@ class Sampler(nn.Module):
         """
         raise NotImplementedError
     
-    @torch.jit.ignore
     def sample_with_labels(self,B,L,grad=False,nloops=1):
         """Inputs:
             B (int) - The number of states to generate in parallel
@@ -228,7 +227,6 @@ class Sampler(nn.Module):
         return self._off_diag_labels(sample,B,L,grad,nloops)
     
     
-    @torch.jit.ignore
     def _off_diag_labels(self,sample,B,L,grad,D=1):
         """label all of the flipped states faster (no loop in rnn) but using more ram"""
         sflip = torch.zeros([B,L,L,1],device=self.device)
@@ -249,7 +247,6 @@ class Sampler(nn.Module):
 
         return sample,probs.reshape([B,L])
     
-    @torch.jit.ignore
     def sample_with_labelsALT(self,B,L,grad=False,nloops=1):
         """Returns:
             samples  - [B,L,1] matrix of zeros and ones for ground/excited states
