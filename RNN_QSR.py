@@ -112,13 +112,13 @@ if __name__=="__main__sussy":
 
 
 @cuda.jit
-def Vij(Ly,Lx,Rcutoff,V,matrix):
+def Vij(Ly,Lx,V,matrix):
     #matrix will be size [Lx*Ly,Lx*Ly]
     
     i,j=cuda.grid(2)
     if i>Ly or j>Lx:
         return
-    R=Rcutoff**6
+    #R=Rcutoff**6
     #flatten two indices into one
     idx = Ly*j+i
     # only fill in the upper diagonal
@@ -127,17 +127,16 @@ def Vij(Ly,Lx,Rcutoff,V,matrix):
         i2 = k%Ly
         j2=k//Ly
         div = ((i2-i)**2+(j2-j)**2)**3
-        if div<=R:
-            matrix[idx][k]=V/div
+        #if div<=R:
+        matrix[idx][k]=V/div
 
 class Rydberg(Hamiltonian):
     E={16:-0.45776822,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687}
-    def __init__(self,Lx,Ly,V,Omega,delta,R=1000.0,device=device):
+    def __init__(self,Lx,Ly,V,Omega,delta,device=device):
         self.Lx       = Lx              # Size along x
         self.Ly       = Ly              # Size along y
         self.V        = V               # Van der Waals potential
         self.delta    = delta           # Detuning
-        self.R=R
         # off diagonal part is -0.5*Omega
         super(Rydberg,self).__init__(Lx*Ly,-0.5*Omega,device)
         
@@ -147,7 +146,8 @@ class Rydberg(Hamiltonian):
         #diagonal hamiltonian portion can be written as a matrix multiplication then a dot product        
         mat=np.zeros([self.L,self.L])
         
-        Vij[(1,1),(Lx,Ly)](Lx,Ly,self.R,self.V,mat)
+        Vij[(1,1),(Lx,Ly)](Lx,Ly,self.V,mat)
+        #self.Vij.double()
         with torch.no_grad():
             self.Vij.weight[:,:]=torch.Tensor(mat)
             self.Vij.bias.fill_(-self.delta)
@@ -166,10 +166,10 @@ class TFIM(Hamiltonian):
         
     def buildlattice(self):
         #building hamiltonian matrix for diagonal part
-        mat=np.zeros([self.L,self.L])
+        mat=np.zeros([self.L,self.L],dtype=np.float64)
         for i in range(self.L - 1):
             mat[i, i+1] = -self.J
-
+        
         with torch.no_grad():
             self.Vij.weight[:,:]=torch.Tensor(mat)
             self.Vij.bias.fill_(0.0) # no longitudinal field
@@ -674,18 +674,20 @@ def queue_train(op,to=None):
     
     
     if op.dir!="<NONE>":
+        np.save(mydir+"/DEBUG",DEBUG)
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
         trainrnn.save(mydir+"/T")
         samplernn.save(mydir+"/S")
-        np.save(mydir+"/DEBUG",DEBUG)
+        
   except KeyboardInterrupt:
     if op.dir!="<NONE>":
         import os
         DEBUG = np.array(debug)
-        #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
-        torch.save(trainrnn,mydir+"/T")
-        torch.save(samplernn,mydir+"/S")
         np.save(mydir+"/DEBUG",DEBUG)
+        #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
+        trainrnn.save(mydir+"/T")
+        samplernn.save(mydir+"/S")
+        
     
 
 def reg_train(op,to=None):
@@ -775,18 +777,20 @@ def reg_train(op,to=None):
     
 
     if op.dir!="<NONE>":
+        np.save(mydir+"/DEBUG",DEBUG)
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
         trainrnn.save(mydir+"/T")
         #torch.save(samplernn,mydir+"/S")
-        np.save(mydir+"/DEBUG",DEBUG)
+        
   except KeyboardInterrupt:
     if op.dir!="<NONE>":
         import os
         DEBUG = np.array(debug)
-        #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
-        torch.save(trainrnn,mydir+"/T")
-        #torch.save(samplernn,mydir+"/S")
         np.save(mydir+"/DEBUG",DEBUG)
+        #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
+        trainrnn.save(mydir+"/T")
+        #torch.save(samplernn,mydir+"/S")
+        
         
         
 if __name__=="__main__":        
