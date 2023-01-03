@@ -131,7 +131,8 @@ def Vij(Ly,Lx,V,matrix):
         matrix[idx][k]=V/div
 
 class Rydberg(Hamiltonian):
-    E={16:-0.45776822,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687}
+    E={16:-0.45776822,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687,2304:-0.3645}
+    Err = {16: 0.0001,36: 0.0005,64: 0.0002, 144: 0.0002, 256: 0.0002, 576: 0.0006,1024: 0.0007,2304: 0.0007}
     def __init__(self,Lx,Ly,V,Omega,delta,device=device):
         self.Lx       = Lx              # Size along x
         self.Ly       = Ly              # Size along y
@@ -195,6 +196,8 @@ class Sampler(nn.Module):
     def __init__(self,device=device):
         self.device=device
         super(Sampler, self).__init__()
+    def save(self,fn):
+        torch.save(self,fn)
     def logprobability(self,input):
         """Compute the logscale probability of a given state
             Inputs:
@@ -228,6 +231,7 @@ class Sampler(nn.Module):
     
     
     def _off_diag_labels(self,sample,B,L,grad,D=1):
+        # type: (Tensor,int,int,bool,int) -> Tuple[Tensor,Tensor]
         """label all of the flipped states faster (no loop in rnn) but using more ram"""
         sflip = torch.zeros([B,L,L,1],device=self.device)
         #collect all of the flipped states into one array
