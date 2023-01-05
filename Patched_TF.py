@@ -64,7 +64,7 @@ class PE2D(nn.Module):
         self.L=Lx*Ly
     
     def forward(self, x):
-        return x.repeat(1,1,self.d_model//4) + self.pe[:x.shape[0]]
+        return x.repeat(1,1,self.d_model//x.shape[-1]) + self.pe[:x.shape[0]]
 
 
 # In[4]:
