@@ -484,7 +484,7 @@ class FASTGRU(RNN):
 
 
 def new_rnn_with_optim(rnntype,Nh,lr=1e-3,beta1=0.9,beta2=0.999):
-    rnn = RNN(rnntype=rnntype,Nh=Nh)
+    rnn = FASTGRU(rnntype=rnntype,Nh=Nh)
     optimizer = torch.optim.Adam(
     rnn.parameters(), 
     lr=lr, 
@@ -616,7 +616,7 @@ def queue_train(op,to=None):
     
     if type(to)==type(None):
         trainrnn,optimizer=new_rnn_with_optim("GRU",op.Nh,lr=1e-3)
-        samplernn = RNN(rnntype="GRU",Nh=op.Nh)
+        samplernn = FASTGRU(rnntype="GRU",Nh=op.Nh)
     else:
         trainrnn,samplernn,optimizer=to
     
