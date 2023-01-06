@@ -386,7 +386,99 @@ class RNN(Sampler):
 
 # In[9]:
 
+class FASTGRU(RNN):
+    
+    def __init__(self,**kwargs):
+        super(FASTGRU,self).__init__(**kwargs)
+    
+    @torch.jit.export
+    def _off_diag_labels(self,sample,B,L,grad,D=1):
+        # type: (Tensor,int,int,bool,int) -> Tuple[Tensor, Tensor]
+        """label all of the flipped states  - set D as high as possible without it slowing down runtime
+        Parameters:
+            sample - [B,L,1] matrix of zeros and ones for ground/excited states
+            B,L (int) - batch size and sequence length
+            D (int) - Number of partitions sequence-wise. We must have L%D==0 (D divides L)
+            
+        Outputs:
+            
+            sample - same as input
+            probs - [B,L] matrix of probabilities of states with the jth excitation flipped
+        """
+        sample0=sample
+        #sample is batch first at the moment        
+        sflip = torch.zeros([B,L,L,1],device=self.device)
+        #collect all of the flipped states into one array
+        for j in range(L):
+            #get all of the states with one spin flipped
+            sflip[:,j] = sample*1.0
+            sflip[:,j,j] = 1-sflip[:,j,j]
+            
+        #compute all of their logscale probabilities
+        with torch.no_grad():
+            
+            data=torch.zeros(sample.shape,device=self.device)
+            
+            data[:,1:]=sample[:,:-1]
+            
+            #add positional encoding and make the cache
+            
+            h=torch.zeros([1,B,self.Nh],device=self.device)
+            
+            out,_=self.rnn(data,h)
+            
+            #cache for the rnn is the output in this sense
+            #shape [B,L//4,Nh]
+            cache=out
+            probs=torch.zeros([B,L],device=self.device)
+            #expand cache to group L//D flipped states
+            cache=cache.unsqueeze(1)
 
+            #this line took like 1 hour to write I'm so sad
+            #the cache has to be shaped such that the batch parts line up
+                        
+            cache=cache.repeat(1,L//D,1,1).reshape(B*L//D,L,cache.shape[-1])
+                        
+            pred0 = self.lin(out)
+            ones = sample*pred0
+            zeros=(1-sample)*(1-pred0)
+            total0 = ones+zeros
+
+            for k in range(D):
+
+                N = k*L//D
+                #next couple of steps are crucial          
+                #get the samples from N to N+L//D
+                #Note: samples are the same as the original up to the Nth spin
+                real = sflip[:,N:(k+1)*L//D]
+                #flatten it out 
+                tmp = real.reshape([B*L//D,L,1])
+                #set up next state predction
+                fsample=torch.zeros(tmp.shape,device=self.device)
+                fsample[:,1:]=tmp[:,:-1]
+                #grab your rnn output
+                if k==0:
+                    out,_=self.rnn(fsample,cache[:,0].unsqueeze(0)*0.0)
+                else:
+                    out,_=self.rnn(fsample[:,N:],cache[:,N-1].unsqueeze(0)*1.0)
+                # grab output for the new part
+                output = self.lin(out)
+                # reshape output separating batch from spin flip grouping
+                pred = output.view([B,L//D,L-N,1])
+                
+                real=real[:,:,N:]
+                ones = real*pred
+                zeros=(1-real)*(1-pred)
+                total = ones+zeros
+                
+                #sum across the sequence for probabilities
+                #print(total.shape,total0.shape)
+                #sum across the sequence for probabilities
+                logp=torch.sum(torch.log(total+1e-10),dim=2).squeeze(2)
+                logp+=torch.sum(torch.log(total0[:,:N]+1e-10),dim=1)
+                probs[:,N:(k+1)*L//D]=logp
+                
+        return sample0,probs
 
 # In[10]:
 
