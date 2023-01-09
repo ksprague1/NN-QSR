@@ -17,7 +17,7 @@ import torch
 from torch import nn
 ngpu=1
 device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
-print(device)
+print(device,torch.cuda.get_device_properties(device))
 from numba import cuda
 
 
@@ -146,8 +146,10 @@ class Rydberg(Hamiltonian):
         
         #diagonal hamiltonian portion can be written as a matrix multiplication then a dot product        
         mat=np.zeros([self.L,self.L])
-        
-        Vij[(1,1),(Lx,Ly)](Lx,Ly,self.V,mat)
+        if Lx>32:
+            Vij[(4,4),(Lx//4,Ly//4)](Lx,Ly,self.V,mat)
+        else:
+            Vij[(1,1),(Lx,Ly)](Lx,Ly,self.V,mat)
         #self.Vij.double()
         with torch.no_grad():
             self.Vij.weight[:,:]=torch.Tensor(mat)
@@ -864,6 +866,7 @@ def reg_train(op,to=None):
 
         if x%500==0:
             print(int(time.time()-t),end=",%.2f|"%(losses[-1]))
+            if x%4000==0:print()
     print(time.time()-t,x+1)
 
     # In[18]:
