@@ -425,6 +425,220 @@ class PatchTransformerB(PatchTransformerBase):
 # In[8]:
 
 
+class PatchedRNN(Sampler):
+    TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
+    def __init__(self,Lx,rnntype="GRU",Nh=128,device=device, **kwargs):
+        super(PatchedRNN, self).__init__(device=device)
+        
+        
+        assert rnntype!="LSTM"
+        #rnn takes input shape [B,L,1]
+        self.rnn = RNN.TYPES[rnntype](input_size=4,hidden_size=Nh,batch_first=True)
+        
+        
+        self.lin = nn.Sequential(
+                nn.Linear(Nh,Nh),
+                nn.ReLU(),
+                nn.Linear(Nh,16),
+                nn.Softmax(dim=-1)
+            )
+        self.Nh=Nh
+        self.rnntype=rnntype
+        
+        
+        self.Lx=Lx
+        self.L = (Lx**2//4)
+        
+        self.options=torch.zeros([16,4],device=self.device)
+        tmp=torch.arange(16,device=self.device)
+        for i in range(4):
+            self.options[:,i]=(tmp>>i)%2
+            
+        
+        self.to(device)
+    def forward(self, input):
+        # h0 is shape [d*numlayers,B,H] but D=numlayers=1 so
+        # h0 has shape [1,B,H]
+        
+        #if self.rnntype=="LSTM":
+        #    h0=[torch.zeros([1,input.shape[0],self.Nh],device=self.device),
+        #       torch.zeros([1,input.shape[0],self.Nh],device=self.device)]
+            #h0 and c0
+        #else:
+        h0=torch.zeros([1,input.shape[0],self.Nh],device=self.device)
+        out,h=self.rnn(input,h0)
+        return self.lin(out)
+    
+    @torch.jit.export
+    def logprobability(self,input):
+        # type: (Tensor) -> Tensor
+        """Compute the logscale probability of a given state
+            Inputs:
+                input - [B,L,1] matrix of zeros and ones for ground/excited states
+            Returns:
+                logp - [B] size vector of logscale probability labels
+        """
+                
+        #shape is modified to [B,L//4,4]
+        input = patch(input.squeeze(-1),self.Lx)
+        data=torch.zeros(input.shape,device=self.device)
+        #batch first
+        data[:,1:]=input[:,:-1]
+        # [B,L//4,Nh] -> [B,L//4,16]
+        output = self.forward(data)
+        
+        #real is going to be a onehot with the index of the appropriate patch set to 1
+        #shape will be [B,L//4,16]
+        real=patch2onehot(input)
+        
+        #[B,L//4,16] -> [B,L//4]
+        total = torch.sum(real*output,dim=-1)
+        #[B,L//4] -> [B]
+        logp=torch.sum(torch.log(total+1e-10),dim=1)
+        return logp
+    @torch.jit.export
+    def sample(self,B,L,cache=None):
+        # type: (int,int,Optional[Tensor]) -> Tensor
+        """ Generates a set states
+        Inputs:
+            B (int)            - The number of states to generate in parallel
+            L (int)            - The length of generated vectors
+        Returns:
+            samples - [B,L,1] matrix of zeros and ones for ground/excited states
+        """
+        #length is divided by four due to patching
+        L=L//4
+        #if self.rnntype=="LSTM":
+        #    h=[torch.zeros([1,B,self.Nh],device=self.device),
+        #       torch.zeros([1,B,self.Nh],device=self.device)]
+            #h is h0 and c0
+        #else:
+        h=torch.zeros([1,B,self.Nh],device=self.device)
+        #Sample set will have shape [B,L,4]
+        #need one extra zero batch at the start for first pred hence input is [L+1,B,1] 
+        input = torch.zeros([B,L+1,4],device=self.device)
+         
+        with torch.no_grad():
+          for idx in range(1,L+1):
+            #out should be batch first [B,L,Nh]
+            out,h=self.rnn(input[:,idx-1:idx,:],h)
+            #check out the probability of all 16 vectors
+            probs=self.lin(out[:,0,:]).view([B,16])
+            #sample from the probability distribution
+            indices = torch.multinomial(probs,1,False).squeeze(1)
+            #extract samples
+            sample = self.options[indices]
+            #set input to the sample that was actually chosen
+            input[:,idx] = sample
+        #remove the leading zero in the input    
+        #sample is repeated 16 times at 3rd index so we just take the first one
+        return unpatch(input[:,1:],self.Lx).unsqueeze(-1)
+    
+    @torch.jit.export
+    def sample_with_labelsALT(self,B,L,grad=False,nloops=1):
+        # type: (int,int,bool,int) -> Tuple[Tensor,Tensor,Tensor]
+        sample,probs = self.sample_with_labels(B,L,grad,nloops)
+        logsqrtp=probs.mean(dim=1)/2
+        sumsqrtp = torch.exp(probs/2-logsqrtp.unsqueeze(1)).sum(dim=1)
+        return sample,sumsqrtp,logsqrtp
+    @torch.jit.export
+    def sample_with_labels(self,B,L,grad=False,nloops=1):
+        # type: (int,int,bool,int) -> Tuple[Tensor,Tensor]
+        sample=self.sample(B,L,None)
+        return self._off_diag_labels(sample,B,L,grad,nloops)
+    
+    
+    @torch.jit.export
+    def _off_diag_labels(self,sample,B,L,grad,D=1):
+        # type: (Tensor,int,int,bool,int) -> Tuple[Tensor, Tensor]
+        """label all of the flipped states  - set D as high as possible without it slowing down runtime
+        Parameters:
+            sample - [B,L,1] matrix of zeros and ones for ground/excited states
+            B,L (int) - batch size and sequence length
+            D (int) - Number of partitions sequence-wise. We must have L%D==0 (D divides L)
+            
+        Outputs:
+            
+            sample - same as input
+            probs - [B,L] matrix of probabilities of states with the jth excitation flipped
+        """
+        sample0=sample
+        #sample is batch first at the moment
+        sample = patch(sample.squeeze(-1),self.Lx)
+        
+        sflip = torch.zeros([B,L,L//4,4],device=self.device)
+        #collect all of the flipped states into one array
+        for j in range(L//4):
+            #have to change the order of in which states are flipped for the cache to be useful
+            for j2 in range(4):
+                sflip[:,j*4+j2] = sample*1.0
+                sflip[:,j*4+j2,j,j2] = 1-sflip[:,j*4+j2,j,j2]
+            
+        #compute all of their logscale probabilities
+        with torch.no_grad():
+            
+            data=torch.zeros(sample.shape,device=self.device)
+            
+            data[:,1:]=sample[:,:-1]
+            
+            #add positional encoding and make the cache
+            
+            h=torch.zeros([1,B,self.Nh],device=self.device)
+            
+            out,_=self.rnn(data,h)
+            
+            #cache for the rnn is the output in this sense
+            #shape [B,L//4,Nh]
+            cache=out
+            probs=torch.zeros([B,L],device=self.device)
+            #expand cache to group L//D flipped states
+            cache=cache.unsqueeze(1)
+
+            #this line took like 1 hour to write I'm so sad
+            #the cache has to be shaped such that the batch parts line up
+                        
+            cache=cache.repeat(1,L//D,1,1).reshape(B*L//D,L//4,cache.shape[-1])
+                        
+            pred0 = self.lin(out)
+            #shape will be [B,L//4,16]
+            real=patch2onehot(sample)
+            #[B,L//4,16] -> [B,L//4]
+            total0 = torch.sum(real*pred0,dim=-1)
+
+            for k in range(D):
+
+                N = k*L//D
+                #next couple of steps are crucial          
+                #get the samples from N to N+L//D
+                #Note: samples are the same as the original up to the Nth spin
+                real = sflip[:,N:(k+1)*L//D]
+                #flatten it out and set to sequence first
+                tmp = real.reshape([B*L//D,L//4,4])
+                #set up next state predction
+                fsample=torch.zeros(tmp.shape,device=self.device)
+                fsample[:,1:]=tmp[:,:-1]
+                #grab your rnn output
+                if k==0:
+                    out,_=self.rnn(fsample,cache[:,0].unsqueeze(0)*0.0)
+                else:
+                    out,_=self.rnn(fsample[:,N//4:],cache[:,N//4-1].unsqueeze(0)*1.0)
+                # grab output for the new part
+                output = self.lin(out)
+                # reshape output separating batch from spin flip grouping
+                pred = output.view([B,L//D,(L-N)//4,16])
+                real = patch2onehot(real[:,:,N//4:])
+                total = torch.sum(real*pred,dim=-1)
+                #sum across the sequence for probabilities
+                #print(total.shape,total0.shape)
+                logp=torch.sum(torch.log(total+1e-10),dim=-1)
+                logp+=torch.sum(torch.log(total0[:,:N//4]+1e-10),dim=-1).unsqueeze(-1)
+                probs[:,N:(k+1)*L//D]=logp
+                
+        return sample0,probs
+
+
+
+
 if __name__=="__main__":
     
     import sys

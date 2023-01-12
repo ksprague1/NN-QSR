@@ -547,6 +547,7 @@ class Opt:
             out+=line+"\n"
         return out
     def cmd(self):
+        """Returns a string with command line arguments corresponding to the options"""
         out=""
         for key in self.__dict__:
             line=key+"="+str(self.__dict__[key])
@@ -554,6 +555,7 @@ class Opt:
         return out[:-1]
     
     def apply(self,args):
+        """Takes in a set of command line arguments and turns them into options"""
         kwargs = dict()
         for arg in args:
             try:
@@ -562,12 +564,27 @@ class Opt:
             except:pass
         self.__dict__.update(kwargs)
     def sus_cast(self,x0):
+        """Casting from a string to a floating point or integer
+        TODO: add support for booleans
+        """
         try:
             x=x0
             x=float(x0)
             x=int(x0)
         except:return x
         return x
+    def from_file(self,fn):
+        """Takes a file and converts it to options"""
+        kwargs = dict()
+        with open(fn,"r") as f:
+          for line in f:
+            line=line.strip()
+            split = line.split("\t")
+            key,val = split[0].strip(),split[-1].strip()
+            try:
+                kwargs[key]=self.sus_cast(val)
+            except:pass
+        self.__dict__.update(kwargs)
 
 
 # In[14]:
@@ -761,7 +778,8 @@ def queue_train(op,to=None):
         debug+=[[Ev.item()**0.5,Eo.item(),CEv.item()**0.5,CEo.item(),loss.item(),E_i.mean().item(),f,time.time()-t]]
 
         if x%500==0:
-            print(int(time.time()-t),end=",%.2f|"%(losses[-1]))
+            print(int(time.time()-t),end=",%.3f|"%(losses[-1]))
+            if x%4000==0:print()
     print(time.time()-t,x+1)
 
 
@@ -865,7 +883,7 @@ def reg_train(op,to=None):
         debug+=[[Ev.item()**0.5,Eo.item(),Ev.item()**0.5,Eo.item(),loss.item(),Eo.item(),0,time.time()-t]]
 
         if x%500==0:
-            print(int(time.time()-t),end=",%.2f|"%(losses[-1]))
+            print(int(time.time()-t),end=",%.3f|"%(losses[-1]))
             if x%4000==0:print()
     print(time.time()-t,x+1)
 
