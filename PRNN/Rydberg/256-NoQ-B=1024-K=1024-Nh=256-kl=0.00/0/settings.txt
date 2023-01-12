@@ -1,0 +1,15 @@
+L                             			256
+Q                             			1
+K                             			1024
+B                             			1024
+TOL                           			0.15
+M                             			0.9
+USEQUEUE                      			0
+NLOOPS                        			64
+hamiltonian                   			Rydberg
+steps                         			12000
+dir                           			PRNN
+Nh                            			256
+lr                            			0.0005
+kl                            			0.0
+

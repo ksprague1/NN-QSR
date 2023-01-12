@@ -1,0 +1,15 @@
+L                             			576
+Q                             			1
+K                             			256
+B                             			256
+TOL                           			0.15
+M                             			0.9
+USEQUEUE                      			0
+NLOOPS                        			144
+hamiltonian                   			Rydberg
+steps                         			12000
+dir                           			PTF
+Nh                            			128
+lr                            			0.0005
+kl                            			0.0
+
