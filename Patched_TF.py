@@ -64,6 +64,8 @@ class PE2D(nn.Module):
         self.L=Lx*Ly
     
     def forward(self, x):
+        if self.d_model%x.shape[-1]!=0:
+            return x.repeat(1,1,self.d_model//x.shape[-1]+1)[:,:,:self.d_model] + self.pe[:x.shape[0]]
         return x.repeat(1,1,self.d_model//x.shape[-1]) + self.pe[:x.shape[0]]
 
 
@@ -648,8 +650,12 @@ if __name__=="__main__":
     op.B=op.K*op.Q
     print(op)
     Lx=int(op.L**0.5)
-    trainsformer = torch.jit.script(PatchTransformerB(Lx,Nh=op.Nh,num_layers=2))
-    sampleformer = torch.jit.script(PatchTransformerB(Lx,Nh=op.Nh,num_layers=2))
+    if "PRNN" in op.dir:
+        trainsformer = torch.jit.script(PatchedRNN(Lx,Nh=op.Nh,num_layers=2))
+        sampleformer = torch.jit.script(PatchedRNN(Lx,Nh=op.Nh,num_layers=2)) 
+    else:
+        trainsformer = torch.jit.script(PatchTransformerB(Lx,Nh=op.Nh,num_layers=2))
+        sampleformer = torch.jit.script(PatchTransformerB(Lx,Nh=op.Nh,num_layers=2))
     beta1=0.9;beta2=0.999
     optimizer = torch.optim.Adam(
     trainsformer.parameters(), 

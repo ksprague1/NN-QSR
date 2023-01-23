@@ -131,7 +131,7 @@ def Vij(Ly,Lx,V,matrix):
         matrix[idx][k]=V/div
 
 class Rydberg(Hamiltonian):
-    E={16:-0.45776822,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687,2304:-0.3645}
+    E={16:-0.4534,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687,2304:-0.3645}
     Err = {16: 0.0001,36: 0.0005,64: 0.0002, 144: 0.0002, 256: 0.0002, 576: 0.0006,1024: 0.0007,2304: 0.0007}
     def __init__(self,Lx,Ly,V,Omega,delta,device=device):
         self.Lx       = Lx              # Size along x
@@ -533,9 +533,10 @@ class Opt:
     dir (str) -- Output directory, set to <NONE> for no output
     Nh (int) -- RNN hidden size
     kl (float >=0) -- loss term for kl divergence
+    ffq (bool) -- whether or not the model has a builtin fill queue function
     """
     DEFAULTS={'L':16,'Q':32,'K':16,'B':32*16,'TOL':0.15,'M':31/32,'USEQUEUE':True,'NLOOPS':1,
-              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128,"lr":1e-3,"kl":0.0}
+              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128,"lr":1e-3,"kl":0.0,"ffq":False}
     def __init__(self,**kwargs):
         self.__dict__.update(Opt.DEFAULTS)
         self.__dict__.update(kwargs)
@@ -568,6 +569,9 @@ class Opt:
         TODO: add support for booleans
         """
         try:
+            if x0 =="True":return True
+            if x0 =="False":return False
+            if x0 =="None":return None
             x=x0
             x=float(x0)
             x=int(x0)
@@ -842,7 +846,10 @@ def reg_train(op,to=None):
     sqrtp_queue=torch.zeros([op.B],device=device)
 
     def fill_queue():
-        for i in range(op.Q):
+        if op.ffq:
+            trainrnn.ffq(samplequeue,sump_queue,sqrtp_queue,op.Q,op.K,op.L,op.NLOOPS)
+        else:
+          for i in range(op.Q):
             sample,sump,sqrtp = trainrnn.sample_with_labelsALT(op.K,op.L,grad=False,nloops=op.NLOOPS)
             samplequeue[i*op.K:(i+1)*op.K]=sample
             sump_queue[i*op.K:(i+1)*op.K]=sump
