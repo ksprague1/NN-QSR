@@ -385,15 +385,10 @@ class PRNN(Sampler):
             
         
         self.to(device)
-    def forward(self, input):
-        # h0 has shape [1,B,H]
-        h0=torch.zeros([1,input.shape[0],self.Nh],device=self.device)
-        out,h=self.rnn(input,h0)
-        return self.lin(out)
     
     @torch.jit.export
-    def logprobability(self,input):
-        # type: (Tensor) -> Tensor
+    def logprobability(self,input,h0=None):
+        # type: (Tensor,Optional[Tensor]) -> Tensor
         """Compute the logscale probability of a given state
             Inputs:
                 input - [B,L,1] matrix of zeros and ones for ground/excited states
@@ -407,7 +402,11 @@ class PRNN(Sampler):
         #batch first
         data[:,1:]=input[:,:-1]
         # [B,L//4,Nh] -> [B,L//4,16]
-        output = self.forward(data)
+        
+        if h0 is None:
+            h0=torch.zeros([1,input.shape[0],self.Nh],device=self.device)
+        out,h=self.rnn(data,h0)
+        output = self.lin(out)
         
         #real is going to be a onehot with the index of the appropriate patch set to 1
         #shape will be [B,L//4,16]
@@ -419,8 +418,8 @@ class PRNN(Sampler):
         logp=torch.sum(torch.log(total),dim=1)
         return logp
     @torch.jit.export
-    def sample(self,B,L):
-        # type: (int,int) -> Tuple[Tensor,Tensor]
+    def sample(self,B,L,h0=None):
+        # type: (int,int,Optional[Tensor]) -> Tuple[Tensor,Tensor]
         """ Generates a set states
         Inputs:
             B (int)            - The number of states to generate in parallel
@@ -435,7 +434,10 @@ class PRNN(Sampler):
         #       torch.zeros([1,B,self.Nh],device=self.device)]
             #h is h0 and c0
         #else:
-        h=torch.zeros([1,B,self.Nh],device=self.device)
+        if h0 is None:  
+            h=torch.zeros([1,B,self.Nh],device=self.device)
+        else:
+            h=h0
         #Sample set will have shape [B,L,p]
         #need one extra zero batch at the start for first pred hence input is [L+1,B,1] 
         input = torch.zeros([B,L+1,self.p],device=self.device)
@@ -600,10 +602,11 @@ class Opt:
     _2D (bool) -- If you should make 2D patches and pe or not
     kl (float >=0) -- loss term for kl divergence
     ffq (bool) -- whether or not the model has a builtin fill queue function
+    sgrad (bool) -- whether or not to sample with gradients. (Less ram when running transformers but slightly slower)
     """
     DEFAULTS={'L':16,'Q':1,'K':256,'B':256,'TOL':0.15,'M':31/32,'USEQUEUE':False,'NLOOPS':1,
               "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128,"lr":5e-4,"patch":1,"kl":0.0,"ffq":False,
-             "_2D":False}
+             "_2D":False,"sgrad":True}
     def __init__(self,**kwargs):
         self.__dict__.update(Opt.DEFAULTS)
         self.__dict__.update(kwargs)
@@ -674,13 +677,16 @@ def setup_dir(op):
         Output directory mydir
     
     """
-    if op.dir!="<NONE>":
-        if op.USEQUEUE:
-            mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d-Nh=%d-kl=%.2f"%(op.hamiltonian,op.L,op.M,op.B,op.K,op.Nh,op.kl)
-        else:
-            mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d-Nh=%d-P=%d"%(op.hamiltonian,op.L,op.B,op.K,op.Nh,op.patch)
+    if op.dir=="<NONE>":
+        return
+    if op.USEQUEUE:
+        mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d-Nh=%d-kl=%.2f"%(op.hamiltonian,op.L,op.M,op.B,op.K,op.Nh,op.kl)
+    else:
+        mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d-Nh=%d-P=%d"%(op.hamiltonian,op.L,op.B,op.K,op.Nh,op.patch)
     if op.hamiltonian == "TFIM":
         mydir+=("-h=%.1f"%op.h)
+    if op._2D:
+        mydir+="-2D"
     mkdir(op.dir)
     mkdir(op.dir+"/%s"%op.hamiltonian)
     mkdir(mydir)
@@ -744,7 +750,11 @@ def reg_train(op,to=None,printf=False,mydir=None):
             net.ffq(samplequeue,sump_queue,sqrtp_queue,op.Q,op.K,op.L,op.NLOOPS)
         else:
           for i in range(op.Q):
-            sample,logp = net.sample(op.K,op.L)
+            if op.sgrad:
+                sample,logp = net.sample(op.K,op.L)
+            else:
+              with torch.no_grad():
+                sample,logp = net.sample(op.K,op.L)
             sump,sqrtp = net.off_diag_labels_summed(sample,nloops=op.NLOOPS)
             samplequeue[i*op.K:(i+1)*op.K]=sample
             sump_queue[i*op.K:(i+1)*op.K]=sump
@@ -758,7 +768,7 @@ def reg_train(op,to=None,printf=False,mydir=None):
         logp = fill_queue()
                 
         # get probability labels for the Q>1 case
-        if op.Q!=1:
+        if op.Q!=1 or not op.sgrad:
             logp=net.logprobability(samplequeue)
 
         #obtain energy
@@ -811,7 +821,7 @@ def reg_train(op,to=None,printf=False,mydir=None):
         #print(DEBUG[-1][3]/Lx/Ly-exact_energy,DEBUG[-1][3]/Lx/Ly,DEBUG[-1][1]/Lx/Ly,exact_energy)
         net.save(mydir+"/T")
         #torch.save(samplernn,mydir+"/S")
-        
+  return DEBUG
 
         
 if __name__=="__main__":        

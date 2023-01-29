@@ -302,6 +302,7 @@ class PTF(Sampler):
         #Sample set will have shape [L/p,B,p]
         #need one extra zero batch at the start for first pred hence input is [L+1,B,1] 
         input = torch.zeros([L+1,B,self.p],device=self.device)
+
         logp = torch.zeros([B],device=self.device)
         
         #with torch.no_grad():
