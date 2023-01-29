@@ -11,7 +11,9 @@ class FastMaskedTransformerEncoder(nn.Module):#(torch.jit.ScriptModule):
         #print(nhead)
         #Encoder only transformer
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=Nh, nhead=nhead, dropout=dropout)
-        self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)        
+        self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)      
+        self.nl=num_layers
+        self.Nh=Nh
         self.device=device
     def set_mask(self, L):
         # type: (int)
@@ -249,8 +251,8 @@ class PTF(Sampler):
         self.pe.L=L
 
     @torch.jit.export
-    def logprobability(self,input):
-        # type: (Tensor) -> Tensor
+    def logprobability(self,input,h0=None):
+        # type: (Tensor,Optional[Tensor]) -> Tensor
         """Compute the logscale probability of a given state
             Inputs:
                 input - [B,L,1] matrix of zeros and ones for ground/excited states
@@ -272,8 +274,24 @@ class PTF(Sampler):
         encoded=self.pe(data)
         #shape is preserved
         output = self.transformer(encoded)
-        # [L//p,B,Nh] -> [L//p,B,2^p]
-        output = self.lin(output)
+        
+        
+        if h0 is not None:
+            #h0 is shape [1,B,Nh0]
+            nh0 = h0.shape[-1]
+            Lp,B,nh=output.shape
+            LpB=Lp*B
+            
+            h0=h0.repeat(1,Lp,1)
+            #output is shape [L//p,B,Nh]
+            dotprod = torch.bmm(h0.view([LpB,nh0//nh,nh]),output.view([LpB,nh,1])).squeeze(-1)
+            output=self.lin[3](dotprod).view([Lp,B,1<<self.p])            
+        else:
+            # [L//p,B,Nh] -> [L//p,B,2^p]
+            output = self.lin(output)
+        
+        
+        
         
         #real is going to be a onehot with the index of the appropriate patch set to 1
         #shape will be [L//p,B,2^p]
@@ -286,7 +304,7 @@ class PTF(Sampler):
         return logp   
     
     @torch.jit.export
-    def sample(self,B,L,cache=None):
+    def sample(self,B,L,h0=None):
         # type: (int,int,Optional[Tensor]) -> Tuple[Tensor,Tensor]
         """ Generates a set states
         Inputs:
@@ -305,6 +323,9 @@ class PTF(Sampler):
 
         logp = torch.zeros([B],device=self.device)
         
+        #make cache initially an empty tensor
+        cache = torch.zeros([self.transformer.nl,0,B,self.transformer.Nh],device=self.device)
+        
         #with torch.no_grad():
         for idx in range(1,L+1):
             
@@ -315,7 +336,14 @@ class PTF(Sampler):
             #Get transformer output
             output,cache = self.transformer.next_with_cache(encoded_input,cache)
             #check out the probability of all 16 vectors
-            probs=self.lin(output[-1,:,:]).view([B,1<<self.p])
+            if h0 is not None:
+                #h0 is shape [1,B,Nh0]
+                nh = self.transformer.Nh
+                #output is shape [?,B,Nh]
+                dotprod = torch.bmm(h0.view([B,h0.shape[-1]//nh,nh]),output[-1,:,:].unsqueeze(-1)).squeeze(-1)
+                probs=self.lin[3](dotprod).view([B,1<<self.p])
+            else:
+                probs=self.lin(output[-1,:,:]).view([B,1<<self.p])
 
             #sample from the probability distribution
             indices = torch.multinomial(probs,1,False).squeeze(1)
