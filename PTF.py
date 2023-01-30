@@ -207,28 +207,40 @@ class PTF(Sampler):
     def __init__(self,L,p,_2D=False,device=device,Nh=128,dropout=0.0,num_layers=2,nhead=8, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
+        
+        if type(Nh) is int:
+            Nh = [Nh]*4
+        else:
+            Nh+=[Nh[2]//Nh[0]]
+        
         if _2D:
-            self.pe = PE2D(Nh, L//p,L//p,device)
+            self.pe = PE2D(Nh[0], L//p,L//p,device)
             self.patch=Patch2D(p,L)
             self.L = int(L**2//p**2)
             self.p=int(p**2)
         else:
-            self.pe = PE1D(Nh,L//p,device)
+            self.pe = PE1D(Nh[0],L//p,device)
             self.patch=Patch1D(p,L)
             self.L = int(L//p)
             self.p = int(p)
             
         self.device=device
+        
+        
+        
         #Encoder only transformer
         #misinterperetation on encoder made it so this code does not work
-        self.transformer = FastMaskedTransformerEncoder(Nh=Nh,dropout=dropout,num_layers=num_layers,nhead=nhead)       
+        self.transformer = FastMaskedTransformerEncoder(Nh=Nh[0],dropout=dropout,num_layers=num_layers,nhead=nhead)       
         
         self.lin = nn.Sequential(
-                nn.Linear(Nh,Nh),
+                nn.Linear(Nh[1],Nh[2]),
                 nn.ReLU(),
-                nn.Linear(Nh,1<<self.p),
+                nn.Linear(Nh[3],1<<self.p),
                 nn.Softmax(dim=-1)
             )
+        
+        self.lin0,self.lin1=self.lin[:2],self.lin[2:]
+        
         
         self.set_mask(self.L)
 
@@ -277,6 +289,8 @@ class PTF(Sampler):
         
         
         if h0 is not None:
+            
+            h0 = self.lin0(h0)
             #h0 is shape [1,B,Nh0]
             nh0 = h0.shape[-1]
             Lp,B,nh=output.shape
@@ -285,7 +299,7 @@ class PTF(Sampler):
             h0=h0.repeat(1,Lp,1)
             #output is shape [L//p,B,Nh]
             dotprod = torch.bmm(h0.view([LpB,nh0//nh,nh]),output.view([LpB,nh,1])).squeeze(-1)
-            output=self.lin[3](dotprod).view([Lp,B,1<<self.p])            
+            output=self.lin1(dotprod).view([Lp,B,1<<self.p])            
         else:
             # [L//p,B,Nh] -> [L//p,B,2^p]
             output = self.lin(output)
@@ -316,6 +330,9 @@ class PTF(Sampler):
         #length is divided by four due to patching
         L=L//self.p
         
+        if h0 is not None:
+            h0 = self.lin0(h0)
+        
         #return (torch.rand([B,L,1],device=device)<0.5).to(torch.float32)
         #Sample set will have shape [L/p,B,p]
         #need one extra zero batch at the start for first pred hence input is [L+1,B,1] 
@@ -341,7 +358,7 @@ class PTF(Sampler):
                 nh = self.transformer.Nh
                 #output is shape [?,B,Nh]
                 dotprod = torch.bmm(h0.view([B,h0.shape[-1]//nh,nh]),output[-1,:,:].unsqueeze(-1)).squeeze(-1)
-                probs=self.lin[3](dotprod).view([B,1<<self.p])
+                probs=self.lin1(dotprod).view([B,1<<self.p])
             else:
                 probs=self.lin(output[-1,:,:]).view([B,1<<self.p])
 
