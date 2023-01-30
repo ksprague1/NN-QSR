@@ -1,6 +1,10 @@
 from RNN_QSR import *
 
 ############################################Transformer Encoder Module############################################################
+
+
+#Original Idea: https://github.com/alex-matton/causal-transformer-decoder
+
 class FastMaskedTransformerEncoder(nn.Module):#(torch.jit.ScriptModule):
     """
     Base class for a fast, masked transformer
@@ -110,6 +114,61 @@ class FastMaskedTransformerEncoder(nn.Module):#(torch.jit.ScriptModule):
         new_cache = torch.stack(new_token_cache, dim=0)
         return output, new_cache
     
+    def cross_with_cache(self,q,k,v,cache=None,idx=-1):
+        # type: (Tensor,Tensor,Tensor,Optional[Tensor],int) -> Tuple[Tensor,Tensor]
+        """Efficiently calculates the next output of a transformer given the vectors Q,K and V as well as
+        cached intermediate layer encodings of the input sequence
+        
+        Inputs:
+            tgt - Tensor of shape [L,B,Nh]
+            cache - Tensor of shape ?
+            idx - index from which to start
+            
+        Outputs:
+            output - Tensor of shape [?,B,Nh]
+            new_cache - Tensor of shape ?
+        """
+        #HMMM
+        new_token_cache = []
+        #go through each layer and apply self attention only to the last input
+        for i,layer in enumerate(self.transformer.layers):
+            
+            #have to merge the functions into one
+            src = q[idx:, :, :]
+            mask = None if idx==-1 else self.mask[idx:]
+
+            # self attention part
+            src2 = layer.self_attn(
+                src,#only do attention with the last elem of the sequence
+                k,
+                v,
+                attn_mask=mask,  
+                key_padding_mask=None,
+            )[0]
+            #straight from torch transformer encoder code
+            src = src + layer.dropout1(src2)
+            src = layer.norm1(src)
+            src2 = layer.linear2(layer.dropout(layer.activation(layer.linear1(src))))
+            src = src + layer.dropout2(src2)
+            src = layer.norm2(src)
+            #return src
+            
+            output = src#self.next_attn(output,layer,idx)
+            new_token_cache.append(output)
+            if cache is not None:
+                #layers after layer 1 need to use a cache of the previous layer's output on each input
+                output = torch.cat([cache[i], output], dim=0)
+
+            q=k=v=output
+            
+        #update cache with new output
+        if cache is not None:
+            new_cache = torch.cat([cache, torch.stack(new_token_cache, dim=0)], dim=1)
+        else:
+            new_cache = torch.stack(new_token_cache, dim=0)
+
+        return output, new_cache
+    
 
 ############################################################Positional Encodings#######################################################
     
@@ -211,7 +270,7 @@ class PTF(Sampler):
         if type(Nh) is int:
             Nh = [Nh]*4
         else:
-            Nh+=[Nh[2]//Nh[0]]
+            Nh+=[int(L**2//p**2)*Nh[0]] if _2D else [int(L//p)*Nh[0]]
         
         if _2D:
             self.pe = PE2D(Nh[0], L//p,L//p,device)
@@ -235,7 +294,7 @@ class PTF(Sampler):
         self.lin = nn.Sequential(
                 nn.Linear(Nh[1],Nh[2]),
                 nn.ReLU(),
-                nn.Linear(Nh[3],1<<self.p),
+                nn.Linear(Nh[0],1<<self.p),
                 nn.Softmax(dim=-1)
             )
         
@@ -284,23 +343,23 @@ class PTF(Sampler):
         
         #[L//p,B,p] -> [L//p,B,Nh]
         encoded=self.pe(data)
-        #shape is preserved
-        output = self.transformer(encoded)
+        
+        
         
         
         if h0 is not None:
             
+            L,B,Nh=encoded.shape
             h0 = self.lin0(h0)
-            #h0 is shape [1,B,Nh0]
-            nh0 = h0.shape[-1]
-            Lp,B,nh=output.shape
-            LpB=Lp*B
-            
-            h0=h0.repeat(1,Lp,1)
+            #[1,B,Nh0] -> [L,B,Nh]
+            h=h0.reshape([1,B,Nh,L]).transpose(-1,0).squeeze(-1)
             #output is shape [L//p,B,Nh]
-            dotprod = torch.bmm(h0.view([LpB,nh0//nh,nh]),output.view([LpB,nh,1])).squeeze(-1)
-            output=self.lin1(dotprod).view([Lp,B,1<<self.p])            
+            output,_ = self.transformer.cross_with_cache(encoded,encoded+h,h,None,0)
+            #output,_ = self.transformer.cross_with_cache(encoded,encoded,encoded,None,0)
+            output=self.lin1(output)          
         else:
+            #shape is preserved
+            output = self.transformer(encoded)
             # [L//p,B,Nh] -> [L//p,B,2^p]
             output = self.lin(output)
         
@@ -331,7 +390,10 @@ class PTF(Sampler):
         L=L//self.p
         
         if h0 is not None:
+            #h0 is shape [1,B,Nh0], Nh0=L*Nh
             h0 = self.lin0(h0)
+            #[1,B,Nh0] -> [L,B,Nh]
+            h0=h0.reshape([1,B,self.transformer.Nh,L]).transpose(-1,0).squeeze(-1)
         
         #return (torch.rand([B,L,1],device=device)<0.5).to(torch.float32)
         #Sample set will have shape [L/p,B,p]
@@ -350,16 +412,17 @@ class PTF(Sampler):
             # multiply by 1 to copy the tensor
             encoded_input = self.pe(input[:idx,:,:]*1)
                         
-            #Get transformer output
-            output,cache = self.transformer.next_with_cache(encoded_input,cache)
+            
             #check out the probability of all 16 vectors
             if h0 is not None:
-                #h0 is shape [1,B,Nh0]
-                nh = self.transformer.Nh
+                h = h0[:idx,:,:]
                 #output is shape [?,B,Nh]
-                dotprod = torch.bmm(h0.view([B,h0.shape[-1]//nh,nh]),output[-1,:,:].unsqueeze(-1)).squeeze(-1)
-                probs=self.lin1(dotprod).view([B,1<<self.p])
+                output,cache = self.transformer.cross_with_cache(encoded_input,encoded_input+h,h,cache)
+                #output,cache = self.transformer.cross_with_cache(encoded_input,encoded_input,encoded_input,cache)
+                probs=self.lin1(output[-1,:,:]).view([B,1<<self.p])
             else:
+                #Get transformer output
+                output,cache = self.transformer.next_with_cache(encoded_input,cache)
                 probs=self.lin(output[-1,:,:]).view([B,1<<self.p])
 
             #sample from the probability distribution

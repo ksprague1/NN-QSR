@@ -33,6 +33,8 @@ class PTFRNN(Sampler):
         #print(nhead)
         
         rnnargs["L"] = p
+        if "_2D" in rnnargs and rnnargs["_2D"] is False and _2D:
+            rnnargs["L"] = p**2
         rnnargs["Nh"] = Nh
         
         if _2D:
