@@ -159,7 +159,7 @@ class PTFB(Sampler):
             
             #check out the probability of all 16 vectors
             if h0 is not None:
-                h = h0[:idx,:,:]
+                h = h0
                 #output is shape [?,B,Nh]
                 output = self.transformer(tgt=encoded_input, memory=h, tgt_mask=self.mask[:idx,:idx])
                 #output,cache = self.transformer.cross_with_cache(encoded_input,encoded_input,encoded_input,cache)
