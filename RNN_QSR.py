@@ -208,7 +208,7 @@ class Sampler(nn.Module):
         raise NotImplementedError
     @torch.jit.export
     def off_diag_labels(self,sample,nloops=1):
-        # type: (Tensor,int) -> Tuple[Tensor,Tensor]
+        # type: (Tensor,int) -> Tensor
         """
         Inputs:
             samples  - [B,L,1] matrix of zeros and ones for ground/excited states
