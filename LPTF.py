@@ -1,11 +1,12 @@
 from RNN_QSR import *
 from PTF import *
 
-class PTFRNN(Sampler):
+class LPTF(Sampler):
     TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
     """
     
-    Sampler class which uses a transformer for long term information and an RNN for short term information.
+    Sampler class which uses a transformer for long term information and a smaller Sampler for short term information
+    This can either be in the form of an RNN or a transformer (likely patched).
     
     The sequence is broken into 2D patches (4x4 by default), each patch is expanded to a tensor of size Nh (be repeating it),\
     then a positional encoding is added. You then apply masked self-attention to the patches num_layers times, with the final
@@ -49,6 +50,12 @@ class PTFRNN(Sampler):
             self.p = int(p)
             
 
+        self.tokenize=nn.Sequential(
+                nn.Linear(self.p,Nh),
+                nn.Tanh()
+        )
+            
+            
         self.device=device
         #Encoder only transformer
         #misinterperetation on encoder made it so this code does not work
@@ -87,7 +94,7 @@ class PTFRNN(Sampler):
         data[1:]=input[:-1]
         
         #[L//p,B,p] -> [L//p,B,Nh]
-        encoded=self.pe(data)
+        encoded=self.pe(self.tokenize(data))
         #shape is preserved
         output = self.transformer(encoded)
         
@@ -127,7 +134,7 @@ class PTFRNN(Sampler):
             
             #pe should be sequence first [l,B,Nh]
             # multiply by 1 to copy the tensor
-            encoded_input = self.pe(input[:idx,:,:]*1)
+            encoded_input = self.pe(self.tokenize(input[:idx,:,:]*1))
                         
             #Get transformer output
             output,cache = self.transformer.next_with_cache(encoded_input,cache)
@@ -184,7 +191,7 @@ class PTFRNN(Sampler):
             data[1:]=sample[:-1]
             
             #[L//p,B,p] -> [L//p,B,Nh]
-            encoded=self.pe(data)
+            encoded=self.pe(self.tokenize(data))
             
             #add positional encoding and make the cache
             out,cache=self.transformer.make_cache(encoded)
@@ -217,7 +224,7 @@ class PTFRNN(Sampler):
                 fsample=torch.zeros(tmp.shape,device=self.device)
                 fsample[1:]=tmp[:-1]
                 # put sequence before batch so you can use it with your transformer
-                tgt=self.pe(fsample)
+                tgt=self.pe(self.tokenize(fsample))
                 #grab your transformer output
                 out,_=self.transformer.next_with_cache(tgt,cache[:,:N//self.p],N//self.p)
 
@@ -251,13 +258,20 @@ if __name__=="__main__":
     
     import sys
     print(sys.argv[1:])
-    op=Opt()
+    op=Opt(K=256,B=1,Nh=128,dir="PPTF")
     op.apply(sys.argv[1:])
     op.B=op.K*op.Q
     print(op)
-    Lx=Ly=int(op.L**0.5)
-    trainsformer = torch.jit.script(PTFRNN(Lx,Nh=op.Nh))
-    sampleformer = torch.jit.script(PTFRNN(Lx,Nh=op.Nh))
+    
+    
+    if op._2D:
+        Lx=int(op.L**0.5)
+    else:
+        Lx=op.L
+    
+    rnnargs = dict(p=2*(2-op._2D),_2D=op._2D)
+    
+    trainsformer = torch.jit.script(LPTF(Lx,op.patch,_2D=op._2D,Nh=op.Nh,rnnargs=rnnargs))
     
     print(sum([p.numel() for p in trainsformer.parameters()]))
     
@@ -268,9 +282,15 @@ if __name__=="__main__":
     betas=(beta1,beta2)
     )
     
-    if op.USEQUEUE:
-        queue_train(op,(trainsformer,sampleformer,optimizer))
-    else:
-        print("Training. . .")
-        reg_train(op,(trainsformer,optimizer))
+    mydir=setup_dir(op)
+    orig_stdout = sys.stdout
+    f = open(mydir+'\\output.txt', 'w')
+    sys.stdout = f
+    try:
+        if not op.USEQUEUE:
+            reg_train(op,(trainsformer,optimizer),printf=True,mydir=mydir)
+    except Exception as e:
+        print(e)
+    sys.stdout = orig_stdout
+    f.close()
     

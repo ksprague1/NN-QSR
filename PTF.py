@@ -14,10 +14,11 @@ class FastMaskedTransformerEncoder(nn.Module):#(torch.jit.ScriptModule):
         super(FastMaskedTransformerEncoder, self).__init__()
         #print(nhead)
         #Encoder only transformer
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=Nh, nhead=nhead, dropout=dropout)
-        self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)      
+        encoder_layer = nn.TransformerEncoderLayer(d_model=Nh, nhead=nhead, dropout=dropout)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)      
         self.nl=num_layers
         self.Nh=Nh
+        self.nhead=nhead
         self.device=device
     def set_mask(self, L):
         # type: (int)
@@ -269,8 +270,12 @@ class PTF(Sampler):
         
         if type(Nh) is int:
             Nh = [Nh]*4
+            #self.addK=self.addQ=self.addV=nn.Identity()
         else:
             Nh+=[int(L**2//p**2)*Nh[0]] if _2D else [int(L//p)*Nh[0]]
+            #self.addK=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
+            #self.addQ=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
+            #self.addV=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
         
         if _2D:
             self.pe = PE2D(Nh[0], L//p,L//p,device)
@@ -285,7 +290,13 @@ class PTF(Sampler):
             
         self.device=device
         
+        self.tokenize=nn.Sequential(
+                nn.Linear(self.p,Nh[0]),
+                nn.Tanh()
+        )
         
+        
+        #nn.Linear(self.p,Nh[0])
         
         #Encoder only transformer
         #misinterperetation on encoder made it so this code does not work
@@ -312,7 +323,14 @@ class PTF(Sampler):
         
         
         self.to(device)
+    
+    def mix_tokens(self,token,hidden):
+        qgate = self.addQ(token)
+        kgate = self.addK(hidden)
+        vgate = self.addV(hidden)
         
+        return token*qgate+hidden*(1-qgate),token*kgate+hidden*(1-kgate),token*vgate+hidden*(1-vgate)
+    
     def set_mask(self, L):
         # type: (int)
         """Initialize the self-attention mask"""
@@ -342,7 +360,7 @@ class PTF(Sampler):
         data[1:]=input[:-1]
         
         #[L//p,B,p] -> [L//p,B,Nh]
-        encoded=self.pe(data)
+        encoded=self.pe(self.tokenize(data))
         
         
         
@@ -354,8 +372,8 @@ class PTF(Sampler):
             #[1,B,Nh0] -> [L,B,Nh]
             h=h0.reshape([1,B,Nh,L]).transpose(-1,0).squeeze(-1)
             #output is shape [L//p,B,Nh]
-            output,_ = self.transformer.cross_with_cache(encoded,encoded+h,h,None,0)
-            #output,_ = self.transformer.cross_with_cache(encoded,encoded,encoded,None,0)
+            #output,_ = self.transformer.cross_with_cache(*self.mix_tokens(encoded,h),None,0)
+            output = self.transformer(encoded+h)
             output=self.lin1(output)          
         else:
             #shape is preserved
@@ -410,15 +428,15 @@ class PTF(Sampler):
             
             #pe should be sequence first [l,B,Nh]
             # multiply by 1 to copy the tensor
-            encoded_input = self.pe(input[:idx,:,:]*1)
+            encoded_input = self.pe(self.tokenize(input[:idx,:,:]*1))
                         
             
             #check out the probability of all 16 vectors
             if h0 is not None:
                 h = h0[:idx,:,:]
                 #output is shape [?,B,Nh]
-                output,cache = self.transformer.cross_with_cache(encoded_input,encoded_input+h,h,cache)
-                #output,cache = self.transformer.cross_with_cache(encoded_input,encoded_input,encoded_input,cache)
+                #output,cache = self.transformer.cross_with_cache(*self.mix_tokens(encoded_input,h),cache)
+                output,cache = self.transformer.next_with_cache(encoded_input+h,cache)
                 probs=self.lin1(output[-1,:,:]).view([B,1<<self.p])
             else:
                 #Get transformer output
@@ -484,7 +502,7 @@ class PTF(Sampler):
             data[1:]=sample[:-1]
             
             #[L//p,B,p] -> [L//p,B,Nh]
-            encoded=self.pe(data)
+            encoded=self.pe(self.tokenize(data))
             
             #add positional encoding and make the cache
             out,cache=self.transformer.make_cache(encoded)
@@ -516,7 +534,7 @@ class PTF(Sampler):
                 fsample=torch.zeros(tmp.shape,device=self.device)
                 fsample[1:]=tmp[:-1]
                 # put sequence before batch so you can use it with your transformer
-                tgt=self.pe(fsample)
+                tgt=self.pe(self.tokenize(fsample))
                 #grab your transformer output
                 out,_=self.transformer.next_with_cache(tgt,cache[:,:N//self.p],N//self.p)
 
