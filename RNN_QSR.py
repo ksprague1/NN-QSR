@@ -12,7 +12,7 @@
 
 import numpy as np
 from matplotlib import pyplot as plt
-import math,time
+import math,time,json
 import torch
 from torch import nn
 ngpu=1
@@ -22,7 +22,97 @@ from numba import cuda
 
 
 # # Estimating the Rydberg Hamiltonian:
+class Options:
+    """Base class for managing options"""
+    def __init__(self,**kwargs):
+        self.__dict__.update(self.get_defaults())
+        self.__dict__.update(kwargs)
 
+    def get_defaults(self):
+        """This is where you define your default parameters"""
+        return dict()
+        
+    def __str__(self):
+        out=""
+        for key in self.__dict__:
+            line=key+" "*(30-len(key))+ "\t"*3+str(self.__dict__[key])
+            out+=line+"\n"
+        return out
+    def cmd(self):
+        """Returns a string with command line arguments corresponding to the options
+            Outputs:
+                out (str) - a single string of space-separated command line arguments
+        """
+        out=""
+        for key in self.__dict__:
+            line=key+"="+str(self.__dict__[key])
+            out+=line+" "
+        return out[:-1]
+    
+    def apply(self,args):
+        """Takes in a tuple of command line arguments and turns them into options
+        Inputs:
+            args (tuple<str>) - Your command line arguments
+        
+        """
+        kwargs = dict()
+        for arg in args:
+            try:
+                key,val=arg.split("=")
+                kwargs[key]=self.cmd_cast(val)
+            except:pass
+        self.__dict__.update(kwargs)
+    def cmd_cast(self,x0):
+        """Casting from a string to other datatypes
+            Inputs
+                x0 (string) - A string which could represent an int or float or boolean value
+            Outputs
+                x (?) - The best-fitting cast for x0
+        """
+        try:
+            if x0=="True":return True
+            elif x0=="False":return False
+            elif x0=="None":return None
+            x=x0
+            x=float(x0)
+            x=int(x0)
+        except:return x
+        return x
+    def from_file(self,fn):
+        """Depricated: Takes files formatted in the __str__ format and turns them into a set of options
+        Instead of using this, consider using save() and load() functions. 
+        """
+        kwargs = dict()
+        with open(fn,"r") as f:
+          for line in f:
+            line=line.strip()
+            split = line.split("\t")
+            key,val = split[0].strip(),split[-1].strip()
+            try:
+                kwargs[key]=self.cmd_cast(val)
+            except:pass
+        self.__dict__.update(kwargs)
+        
+    def save(self,fn):
+        """Saves the options in json format
+        Inputs:
+            fn (str) - The file destination for your output file (.json is not appended automatically)
+        Outputs:
+            A plain text json file
+        """
+        with open(fn,"w") as f:
+            json.dump(self.__dict__, f, indent = 4)
+            
+    def load(self,fn):
+        """Saves  options stored in json format
+        Inputs:
+            fn (str) - The file source (.json is not appended automatically)
+        """
+        with open(fn,"r") as f:
+            kwargs = json.load(f)
+        self.__dict__.update(kwargs)
+    def copy(self):
+        return Options(**self.__dict__)
 
 # In[2]:
 
@@ -350,11 +440,19 @@ class PRNN(Sampler):
     2^(p^2) patches so p=2 is about the only patch size which makes sense
     
     """
+    DEFAULTS=Options(patch=1,_2D=False,rnntype="GRU",Nh=256)
     TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
-    def __init__(self,L,p,_2D=False,rnntype="GRU",Nh=128,device=device, **kwargs):
+    def __init__(self,L,patch,_2D,rnntype,Nh,device=device, **kwargs):
+        """
+        Description of these options:
+        Nh (int) -- RNN hidden size / Transformer token size
+        patch (int) -- Number of atoms to consider at once
+        _2D (bool) -- If you should make 2D patches and pe or not
+        """
         super(PRNN, self).__init__(device=device)
-        
+        p=patch
         if _2D:
+            L=int(L**0.5)
             self.patch=Patch2D(p,L)
             self.L = int(L**2//p**2)
             self.p=int(p**2)
@@ -558,7 +656,7 @@ class PRNN(Sampler):
 
 
 def new_rnn_with_optim(rnntype,op,beta1=0.9,beta2=0.999):
-    rnn = torch.jit.script(PRNN(op.L,op.patch,rnntype=rnntype,Nh=op.Nh))
+    rnn = torch.jit.script(PRNN(op.L,**PRNN.DEFAULTS))
     optimizer = torch.optim.Adam(
     rnn.parameters(), 
     lr=op.lr, 
@@ -581,86 +679,12 @@ def momentum_update(m, target_network, network):
 # In[13]:
 
 
-class Opt:
-    """
-    Description of these options:
+
+
+
+
     
-    L (int) -- Total lattice size (np.prod(lattice.shape))
-    Q  (int) -- Number of minibatches in the queue
-    K  (int) -- size of each minibatch
-    B  (int) -- Total batch size (should be Q*K)
-    TOL (float) -- Tolerance to decide if train energies are too good to be true
-    M (float)   -- Momentum used for sample RNN update
-    USEQUEUE (bool)-- If False, the entire queue is updated with samples from the sample rnn at each step
-    NLOOPS (int)   -- This saves ram at the cost of more runtime.
-    hamiltonian (string) -- Which hamiltonian to train on
-    steps (int) -- Number of training steps
-    dir (str) -- Output directory, set to <NONE> for no output
-    Nh (int) -- RNN hidden size / Transformer token size
-    lr (float) -- Learning rate
-    patch (int) -- Number of atoms to consider at once
-    _2D (bool) -- If you should make 2D patches and pe or not
-    kl (float >=0) -- loss term for kl divergence
-    ffq (bool) -- whether or not the model has a builtin fill queue function
-    sgrad (bool) -- whether or not to sample with gradients. (Less ram when running transformers but slightly slower)
-    """
-    DEFAULTS={'L':16,'Q':1,'K':256,'B':256,'TOL':0.15,'M':31/32,'USEQUEUE':False,'NLOOPS':1,
-              "hamiltonian":"Rydberg","steps": 12000,"dir":"out","Nh":128,"lr":5e-4,"patch":1,"kl":0.0,"ffq":False,
-             "_2D":False,"sgrad":True}
-    def __init__(self,**kwargs):
-        self.__dict__.update(Opt.DEFAULTS)
-        self.__dict__.update(kwargs)
-
-    def __str__(self):
-        out=""
-        for key in self.__dict__:
-            line=key+" "*(30-len(key))+ "\t"*3+str(self.__dict__[key])
-            out+=line+"\n"
-        return out
-    def cmd(self):
-        """Returns a string with command line arguments corresponding to the options"""
-        out=""
-        for key in self.__dict__:
-            line=key+"="+str(self.__dict__[key])
-            out+=line+" "
-        return out[:-1]
-    
-    def apply(self,args):
-        """Takes in a set of command line arguments and turns them into options"""
-        kwargs = dict()
-        for arg in args:
-            try:
-                key,val=arg.split("=")
-                kwargs[key]=self.sus_cast(val)
-            except:pass
-        self.__dict__.update(kwargs)
-    def sus_cast(self,x0):
-        """Casting from a string to a floating point or integer
-        TODO: add support for booleans
-        """
-        try:
-            if x0 =="True":return True
-            if x0 =="False":return False
-            if x0 =="None":return None
-            x=x0
-            x=float(x0)
-            x=int(x0)
-        except:return x
-        return x
-    def from_file(self,fn):
-        """Takes a file and converts it to options"""
-        kwargs = dict()
-        with open(fn,"r") as f:
-          for line in f:
-            line=line.strip()
-            split = line.split("\t")
-            key,val = split[0].strip(),split[-1].strip()
-            try:
-                kwargs[key]=self.sus_cast(val)
-            except:pass
-        self.__dict__.update(kwargs)
-
-
+        
 # In[14]:
 import os
 def mkdir(dir_):
@@ -679,14 +703,11 @@ def setup_dir(op):
     """
     if op.dir=="<NONE>":
         return
-    if op.USEQUEUE:
-        mydir= op.dir+"/%s/%d-M=%.3f-B=%d-K=%d-Nh=%d-kl=%.2f"%(op.hamiltonian,op.L,op.M,op.B,op.K,op.Nh,op.kl)
-    else:
-        mydir= op.dir+"/%s/%d-NoQ-B=%d-K=%d-Nh=%d-P=%d"%(op.hamiltonian,op.L,op.B,op.K,op.Nh,op.patch)
+    mydir= op.dir+"/%s/%d-B=%d-K=%d"%(op.hamiltonian,op.L,op.B,op.K)
     if op.hamiltonian == "TFIM":
         mydir+=("-h=%.1f"%op.h)
-    if op._2D:
-        mydir+="-2D"
+    if "patch" in op.__dict__:
+        mydir+="-P=%s"%op.patch
     mkdir(op.dir)
     mkdir(op.dir+"/%s"%op.hamiltonian)
     mkdir(mydir)
@@ -704,7 +725,24 @@ def setup_dir(op):
     print("Output folder path established")
     return mydir
 
-
+class TrainOpt(Options):
+    """
+    Description of these options:
+    
+    L (int) -- Total lattice size (np.prod(lattice.shape))
+    Q  (int) -- Number of minibatches in the queue
+    K  (int) -- size of each minibatch
+    B  (int) -- Total batch size (should be Q*K)
+    NLOOPS (int)   -- This saves ram at the cost of more runtime.
+    steps (int) -- Number of training steps
+    dir (str) -- Output directory, set to <NONE> for no output
+    lr (float) -- Learning rate
+    kl (float >=0) -- loss term for kl divergence
+    sgrad (bool) -- whether or not to sample with gradients. (Less ram when running transformers but slightly slower)
+    hamiltonian (str) -- which hamiltonian to use
+    """
+    def get_defaults(self):
+        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=12000,dir="out",lr=5e-4,kl=0.0,sgrad=False)
 
 import sys
 def reg_train(op,to=None,printf=False,mydir=None):
@@ -746,10 +784,7 @@ def reg_train(op,to=None,printf=False,mydir=None):
     sqrtp_queue=torch.zeros([op.B],device=device)
 
     def fill_queue():
-        if op.ffq:
-            net.ffq(samplequeue,sump_queue,sqrtp_queue,op.Q,op.K,op.L,op.NLOOPS)
-        else:
-          for i in range(op.Q):
+        for i in range(op.Q):
             if op.sgrad:
                 sample,logp = net.sample(op.K,op.L)
             else:
@@ -827,9 +862,45 @@ def reg_train(op,to=None,printf=False,mydir=None):
 if __name__=="__main__":        
     import sys
     print(sys.argv[1:])
-    op=Opt(K=512,B=1,Nh=256,dir="RNN")
-    op.apply(sys.argv[1:])
-    op.B=op.K*op.Q
-    print(op)
-    if not op.USEQUEUE:
-        reg_train(op)
+    train_opt=TrainOpt(K=512,Q=1,dir="RNN")
+    
+    rnn_opt=PRNN.DEFAULTS.copy()
+    
+    if "--rnn" in sys.argv[1:]:
+        split=sys.argv.index("--rnn")
+        train_opt.apply(sys.argv[1:split])
+        rnn_opt.apply(sys.argv[split+1:])
+    else:
+        train_opt.apply(sys.argv[1:])
+        
+    train_opt.B=train_opt.K*train_opt.Q
+    
+    rnn = torch.jit.script(PRNN(train_opt.L,**rnn_opt.__dict__))    
+    
+    beta1=0.9;beta2=0.999
+    optimizer = torch.optim.Adam(
+    rnn.parameters(), 
+    lr=train_opt.lr, 
+    betas=(beta1,beta2)
+    )
+    
+    print(train_opt)
+    
+    mydir=setup_dir(train_opt)
+    orig_stdout = sys.stdout
+    
+    rnn_opt.model_name=PRNN.__name__
+    full_opt = Options(train=train_opt.__dict__,model=rnn_opt.__dict__)
+    full_opt.save(mydir+"\\settings.json")
+    
+    f = open(mydir+'\\output.txt', 'w')
+    sys.stdout = f
+    try:
+        reg_train(train_opt,(rnn,optimizer),printf=True,mydir=mydir)
+    except Exception as e:
+        print(e)
+        sys.stdout = orig_stdout
+        f.close()
+        1/0
+    sys.stdout = orig_stdout
+    f.close()

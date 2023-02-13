@@ -264,10 +264,13 @@ class PTF(Sampler):
     This model has 16 outputs, which describes the probability distrubition for the nth patch when given the first n-1 patches
     
     """
-    def __init__(self,L,p,_2D=False,device=device,Nh=128,dropout=0.0,num_layers=2,nhead=8, **kwargs):
+    
+    
+    DEFAULTS=Options(patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
+    def __init__(self,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
-        
+        p=patch
         if type(Nh) is int:
             Nh = [Nh]*4
             #self.addK=self.addQ=self.addV=nn.Identity()
@@ -278,6 +281,7 @@ class PTF(Sampler):
             #self.addV=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
         
         if _2D:
+            L=int(L**0.5)
             self.pe = PE2D(Nh[0], L//p,L//p,device)
             self.patch=Patch2D(p,L)
             self.L = int(L**2//p**2)
@@ -553,42 +557,50 @@ class PTF(Sampler):
                 
         return probs
 
-
-if __name__=="__main__":
+    
+    
+    
+if __name__=="__main__":        
     import sys
+    print(sys.argv[1:])
+    train_opt=TrainOpt(K=256,Q=1,dir="PTF")
     
-    op=Opt(K=256,B=1,Nh=128,dir="PTF")
+    ptf_opt=PTF.DEFAULTS.copy()
     
-    op.apply(sys.argv[1:])
-    op.B=op.K*op.Q
-    
-    mydir=setup_dir(op)
-      
-    print(op)
-    
-    if op._2D:
-        Lx=int(op.L**0.5)
+    if "--ptf" in sys.argv[1:]:
+        split=sys.argv.index("--ptf")
+        train_opt.apply(sys.argv[1:split])
+        ptf_opt.apply(sys.argv[split+1:])
     else:
-        Lx=op.L
+        train_opt.apply(sys.argv[1:])
+        
+    train_opt.B=train_opt.K*train_opt.Q
     
+    ptf = torch.jit.script(PTF(train_opt.L,**ptf_opt.__dict__))    
     
-    trainsformer = torch.jit.script(PTF(Lx,op.patch,_2D=op._2D,Nh=op.Nh,num_layers=2))
-
     beta1=0.9;beta2=0.999
     optimizer = torch.optim.Adam(
-    trainsformer.parameters(), 
-    lr=op.lr,
+    ptf.parameters(), 
+    lr=train_opt.lr, 
     betas=(beta1,beta2)
     )
     
-    
+    print(train_opt)
+    mydir=setup_dir(train_opt)
     orig_stdout = sys.stdout
+    
+    ptf_opt.model_name=PTF.__name__
+    full_opt = Options(train=train_opt.__dict__,model=ptf_opt.__dict__)
+    full_opt.save(mydir+"\\settings.json")
+    
     f = open(mydir+'\\output.txt', 'w')
     sys.stdout = f
     try:
-        if not op.USEQUEUE:
-            reg_train(op,(trainsformer,optimizer),printf=True,mydir=mydir)
+        reg_train(train_opt,(ptf,optimizer),printf=True,mydir=mydir)
     except Exception as e:
         print(e)
+        sys.stdout = orig_stdout
+        f.close()
+        1/0
     sys.stdout = orig_stdout
     f.close()

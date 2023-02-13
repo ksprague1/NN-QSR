@@ -2,9 +2,8 @@ from RNN_QSR import *
 from PTF import *
 
 class LPTF(Sampler):
-    TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
-    """
     
+    """
     Sampler class which uses a transformer for long term information and a smaller Sampler for short term information
     This can either be in the form of an RNN or a transformer (likely patched).
     
@@ -29,16 +28,14 @@ class LPTF(Sampler):
     together (or adding them in logscale).
     
     """
-    def __init__(self,L,p,_2D=False,device=device,Nh=128,dropout=0.0,num_layers=2,nhead=8, rnnargs={}):
+    DEFAULTS=Options(patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
+    def __init__(self,subsampler,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
-        
-        rnnargs["L"] = p
-        if "_2D" in rnnargs and rnnargs["_2D"] is False and _2D:
-            rnnargs["L"] = p**2
-        rnnargs["Nh"] = Nh
+        p=patch
         
         if _2D:
+            L=int(L**0.5)
             self.pe = PE2D(Nh, L//p,L//p,device)
             self.patch=Patch2D(p,L)
             self.L = int(L**2//p**2)
@@ -61,7 +58,7 @@ class LPTF(Sampler):
         #misinterperetation on encoder made it so this code does not work
         self.transformer = FastMaskedTransformerEncoder(Nh=Nh,dropout=dropout,num_layers=num_layers,nhead=nhead)       
         
-        self.prnn = PRNN(**rnnargs)
+        self.subsampler = subsampler#subsample(**rnnargs)
         
         self.set_mask(self.L)
         
@@ -103,10 +100,10 @@ class LPTF(Sampler):
         h0 = output.view([1,Lp*B,Nh])
         rnn_input = input.reshape([Lp*B,self.p])
         # [L//p*B,p],[1,L//p*B,Nh] -> [L//p,B]
-        logprnn = self.prnn.logprobability(rnn_input,h0).view([Lp,B])
+        logsubsample = self.subsampler.logprobability(rnn_input,h0).view([Lp,B])
         
         #[L//p,B] -> [B]
-        logp=torch.sum(logprnn,dim=0)
+        logp=torch.sum(logsubsample,dim=0)
         return logp
     
     @torch.jit.export
@@ -138,10 +135,10 @@ class LPTF(Sampler):
                         
             #Get transformer output
             output,cache = self.transformer.next_with_cache(encoded_input,cache)
-            #get state and probability by sampling from the prnn
-            sample,logprnn = self.prnn.sample(B,self.p,output[-1].view([1,B,output.shape[-1]]))
+            #get state and probability by sampling from the subsample
+            sample,logsubsample = self.subsampler.sample(B,self.p,output[-1].view([1,B,output.shape[-1]]))
             
-            logp+=logprnn
+            logp+=logsubsample
             #set input to the sample that was actually chosen
             input[idx] = sample.squeeze(-1)
             
@@ -209,7 +206,7 @@ class LPTF(Sampler):
             h0 = out.view([1,Lp*B,Nh])
             rnn_input = sample.reshape([Lp*B,self.p])
             # [L//p*B,p],[1,L//p*B,Nh] -> [L//p,B]
-            logprnn0 = self.prnn.logprobability(rnn_input,h0).view([Lp,B])
+            logsubsample0 = self.subsampler.logprobability(rnn_input,h0).view([Lp,B])
 
             for k in range(D):
 
@@ -238,59 +235,82 @@ class LPTF(Sampler):
                 
                 rnn_input = tmp[N//self.p:].reshape([Lp2*B2,self.p])
                 # [?] -> [(L-N)/p,B*L//D]
-                logprnn = self.prnn.logprobability(rnn_input,h0).view([Lp2,B2])
+                logsubsample = self.subsampler.logprobability(rnn_input,h0).view([Lp2,B2])
 
                 #[(L-N)/p,B*L//D] -> [B,L/D]
                                 
                 #sum over (L-N)/p
-                logp=torch.sum(logprnn,dim=0).view([B,L//D])
+                logp=torch.sum(logsubsample,dim=0).view([B,L//D])
                 
                 #sum over N/p
-                logp+=torch.sum(logprnn0[:N//self.p],dim=0).unsqueeze(-1)
+                logp+=torch.sum(logsubsample0[:N//self.p],dim=0).unsqueeze(-1)
                 
                 probs[:,N:(k+1)*L//D]=logp
                 
         return probs
     
     
-    
-if __name__=="__main__":
-    
+
+if __name__=="__main__":        
     import sys
     print(sys.argv[1:])
-    op=Opt(K=256,B=1,Nh=128,dir="PPTF")
-    op.apply(sys.argv[1:])
-    op.B=op.K*op.Q
-    print(op)
+    
+    split0=split1=len(sys.argv)
+    if "--lptf" in sys.argv[1:]:
+        split0=sys.argv.index("--lptf")
+    if "--rnn" in sys.argv[1:]:
+        split1=sys.argv.index("--rnn")
+        SMODEL=PRNN
+    if "--ptf" in sys.argv[1:]:
+        split1=sys.argv.index("--ptf")
+        SMODEL=PTF
+
+        
+    #Initialize default options
+    train_opt=TrainOpt(K=256,Q=1,dir="LPTF")
+    lptf_opt=LPTF.DEFAULTS.copy()
+    sub_opt=SMODEL.DEFAULTS.copy()
     
     
-    if op._2D:
-        Lx=int(op.L**0.5)
-    else:
-        Lx=op.L
+    # Update options with command line arguments
+    train_opt.apply(sys.argv[1:split0])
+    lptf_opt.apply(sys.argv[split0+1:split1])
+    sub_opt.apply(sys.argv[split1+1:])
     
-    rnnargs = dict(p=2*(2-op._2D),_2D=op._2D)
+    #Add in extra info to options
+    lptf_opt.model_name=LPTF.__name__
+    sub_opt.model_name=SMODEL.__name__
+    train_opt.B=train_opt.K*train_opt.Q
+    if SMODEL==PTF:sub_opt.Nh=[sub_opt.Nh,train_opt.Nh]
     
-    trainsformer = torch.jit.script(LPTF(Lx,op.patch,_2D=op._2D,Nh=op.Nh,rnnargs=rnnargs))
+    # Build models
+    subsampler = SMODEL(**sub_opt.__dict__)
+    lptf = torch.jit.script(LPTF(subsampler,train_opt.L,**lptf_opt.__dict__))    
     
-    print(sum([p.numel() for p in trainsformer.parameters()]))
-    
+    #Initialize optimizer
     beta1=0.9;beta2=0.999
     optimizer = torch.optim.Adam(
-    trainsformer.parameters(), 
-    lr=op.lr, 
+    lptf.parameters(), 
+    lr=train_opt.lr, 
     betas=(beta1,beta2)
     )
     
-    mydir=setup_dir(op)
+    print(train_opt)
+    mydir=setup_dir(train_opt)
     orig_stdout = sys.stdout
+    
+    full_opt = Options(train=train_opt.__dict__,model=lptf_opt.__dict__,submodel=sub_opt.__dict__)
+    full_opt.save(mydir+"\\settings.json")
+    
     f = open(mydir+'\\output.txt', 'w')
     sys.stdout = f
     try:
-        if not op.USEQUEUE:
-            reg_train(op,(trainsformer,optimizer),printf=True,mydir=mydir)
+        reg_train(train_opt,(lptf,optimizer),printf=True,mydir=mydir)
     except Exception as e:
         print(e)
+        sys.stdout = orig_stdout
+        f.close()
+        1/0
     sys.stdout = orig_stdout
     f.close()
     
