@@ -26,6 +26,7 @@ def build_model(args):
         train_opt=TrainOpt(K=256,Q=1,dir="LPTF")
     if "--rnn" in args:
         split1=args.index("--rnn")
+        
         SMODEL=PRNN
         train_opt=TrainOpt(K=512,Q=1,dir="RNN")
     if "--ptf" in args:
@@ -39,6 +40,7 @@ def build_model(args):
     
     
     # Update options with command line arguments
+    split0=min(split0,split1)
     train_opt.apply(args[:split0])
     sub_opt.apply(args[split1+1:])
     
