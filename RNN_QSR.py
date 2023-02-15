@@ -18,7 +18,6 @@ from torch import nn
 ngpu=1
 device = torch.device("cuda:0" if (torch.cuda.is_available() and ngpu > 0) else "cpu")
 print(device,torch.cuda.get_device_properties(device))
-from numba import cuda
 
 
 # # Estimating the Rydberg Hamiltonian:
