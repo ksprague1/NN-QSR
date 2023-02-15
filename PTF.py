@@ -265,6 +265,28 @@ class PTF(Sampler):
     
     """
     
+    INFO = """
+    
+    Transformer based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is projected into a token with an added positional encoding. The sequence of encoded patches is used as transformer input.
+    
+    PTF Optional arguments:
+    
+        L          (int)     -- The total number of atoms in your lattice
+    
+        Nh         (int)     -- Transformer token size. Input patches are projected to match the token size.
+    
+        patch      (int)     -- Number of atoms input/predicted at once (patch size).
+                                The Input sequence will have an effective length of L/patch
+    
+        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
+        
+        dropout    (float)   -- The amount of dropout to use in the transformer layers
+        
+        num_layers (int)     -- The number of transformer layers to use
+        
+        nheads     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
+    
+    """
     
     DEFAULTS=Options(patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
     def __init__(self,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):

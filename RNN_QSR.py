@@ -440,15 +440,29 @@ class PRNN(Sampler):
     2^(p^2) patches so p=2 is about the only patch size which makes sense
     
     """
+    
+    INFO = """
+    
+    RNN based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is used to update the RNN hidden state, which (after two Fully Connected layers) is used to get the probability labels.
+    
+    RNN Optional arguments:
+    
+        L          (int)     -- The total number of atoms in your lattice
+    
+        Nh         (int)     -- RNN hidden size
+    
+        patch      (int)     -- Number of atoms input/predicted at once (patch size).
+                                The Input sequence will have an effective length of L/patch
+    
+        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
+    
+        rnntype    (string)  -- Which type of RNN cell to use. Only ELMAN and GRU are valid options at the moment
+    """
+    
     DEFAULTS=Options(patch=1,_2D=False,rnntype="GRU",Nh=256)
     TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
     def __init__(self,L,patch,_2D,rnntype,Nh,device=device, **kwargs):
-        """
-        Description of these options:
-        Nh (int) -- RNN hidden size / Transformer token size
-        patch (int) -- Number of atoms to consider at once
-        _2D (bool) -- If you should make 2D patches and pe or not
-        """
+        
         super(PRNN, self).__init__(device=device)
         p=patch
         if _2D:
