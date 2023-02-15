@@ -35,7 +35,7 @@ class LPTF(Sampler):
     
     LPTF Optional arguments:
     
-        L          (int)     -- The total number of atoms in your lattice
+        L          (int)     -- The total number of atoms in your lattice.
     
         Nh         (int)     -- Transformer token size. Input patches are projected to match the token size.
                                 Note: When using an inner RNN this Nh MUST match the rnn's Nh

@@ -70,18 +70,21 @@ def build_model(args):
     return model,full_opt,train_opt
 
 def helper(args):
-    
+    example = "Runtime Example:\n>>>python ModelBuilder.py L=64"
     while True:
         if "--lptf" in args:
             print(LPTF.INFO)
+            print(example+" --lptf _2D=True patch=3 --rnn L=9 _2D=False patch=3 Nh=128")
             break
         if "--rnn" in args:
             print(PRNN.INFO)
+            print(example+" --rnn _2D=False patch=4")
             break
         if "--ptf" in args:
             print(PTF.INFO)
+            print(example+" --ptf _2D=True patch=2")
             break
-        args+=[input("What Model do you need help with?\nOptions are --rnn, --lptf, and --ptf:\n")]
+        args=["--"+input("What Model do you need help with?\nOptions are rnn, lptf, and ptf:\n".lower())]
         
 
 
