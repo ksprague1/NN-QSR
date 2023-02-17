@@ -11,7 +11,6 @@
 
 
 import numpy as np
-from matplotlib import pyplot as plt
 import math,time,json
 import torch
 from torch import nn
@@ -419,7 +418,7 @@ def genpatch2onehot(patch,p):
     
     """
     #moving the last dimension to the front
-    patch=patch.unsqueeze(0).transpose(-1,0).squeeze(-1)
+    patch=patch.unsqueeze(0).transpose(-1,0).squeeze(-1).to(torch.int64)
     out=torch.zeros(patch.shape[1:],device=patch.device)
     for i in range(p):
         out+=patch[i]<<i

@@ -70,6 +70,9 @@ def build_model(args):
     return model,full_opt,train_opt
 
 def helper(args):
+    
+    help(build_model)
+    
     example = "Runtime Example:\n>>>python ModelBuilder.py L=64"
     while True:
         if "--lptf" in args:
