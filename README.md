@@ -75,9 +75,6 @@ PTF Optional arguments:
 
 ### Large-Patched Transformer (LPTF)
 
-### Patched Transformer (PTF)
-
-
 
 All optional LPTF parameters can be viewed by running 
 
