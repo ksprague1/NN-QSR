@@ -87,7 +87,11 @@ def helper(args):
             print(PTF.INFO)
             print(example+" --ptf _2D=True patch=2")
             break
-        args=["--"+input("What Model do you need help with?\nOptions are rnn, lptf, and ptf:\n".lower())]
+        if "--training" in args:
+            print(TrainOpt.__doc__)
+            break
+            
+        args=["--"+input("What Model do you need help with?\nOptions are rnn, lptf, ptf, and training:\n".lower())]
         
 
 

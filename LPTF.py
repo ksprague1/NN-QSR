@@ -38,7 +38,7 @@ class LPTF(Sampler):
         L          (int)     -- The total number of atoms in your lattice.
     
         Nh         (int)     -- Transformer token size. Input patches are projected to match the token size.
-                                Note: When using an inner RNN this Nh MUST match the rnn's Nh
+                                Note: When using an RNN subsampler this Nh MUST match the rnn's Nh
     
         patch      (int)     -- Number of atoms input/predicted at once (patch size).
                                 The Input sequence will have an effective length of L/patch

@@ -739,19 +739,30 @@ def setup_dir(op):
 
 class TrainOpt(Options):
     """
-    Description of these options:
+    Training Arguments:
     
-    L (int) -- Total lattice size (np.prod(lattice.shape))
-    Q  (int) -- Number of minibatches in the queue
-    K  (int) -- size of each minibatch
-    B  (int) -- Total batch size (should be Q*K)
-    NLOOPS (int)   -- This saves ram at the cost of more runtime.
-    steps (int) -- Number of training steps
-    dir (str) -- Output directory, set to <NONE> for no output
-    lr (float) -- Learning rate
-    kl (float >=0) -- loss term for kl divergence
-    sgrad (bool) -- whether or not to sample with gradients. (Less ram when running transformers but slightly slower)
-    hamiltonian (str) -- which hamiltonian to use
+        L          (int)     -- Total lattice size (8x8 would be L=64)
+        
+        Q          (int)     -- Number of minibatches per batch
+        
+        K          (int)     -- size of each minibatch
+        
+        B          (int)     -- Total batch size (should be Q*K)
+        
+        NLOOPS     (int)     -- This saves ram at the cost of more runtime.
+        
+        steps      (int)     -- Number of training steps
+        
+        dir        (str)     -- Output directory, set to <NONE> for no output
+        
+        lr         (float)   -- Learning rate
+        
+        kl         (float)   -- loss term for kl divergence
+        
+        sgrad      (bool)    -- whether or not to sample with gradients. 
+                                (Uses less ram when but slightly slower)
+        
+        hamiltonian (str)    -- which hamiltonian to use
     """
     def get_defaults(self):
         return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=12000,dir="out",lr=5e-4,kl=0.0,sgrad=False)
