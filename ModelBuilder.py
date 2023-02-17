@@ -89,6 +89,7 @@ def helper(args):
             break
         if "--training" in args:
             print(TrainOpt.__doc__)
+            print(example+" NLOOPS=16 sgrad=False steps=4000 --ptf _2D=True patch=2")
             break
             
         args=["--"+input("What Model do you need help with?\nOptions are rnn, lptf, ptf, and training:\n".lower())]

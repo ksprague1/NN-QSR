@@ -749,7 +749,9 @@ class TrainOpt(Options):
         
         B          (int)     -- Total batch size (should be Q*K)
         
-        NLOOPS     (int)     -- This saves ram at the cost of more runtime.
+        NLOOPS     (int)     -- Number of loops within the off_diag_labels function. Higher values save ram and
+                                generally makes the code run faster (up to 2x). Note, you can only set this
+                                as high as your effective sequence length. (Take L and divide by your patch size).
         
         steps      (int)     -- Number of training steps
         
