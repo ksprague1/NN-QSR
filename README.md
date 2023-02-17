@@ -14,6 +14,50 @@ TODO: Make an environment.yaml file
 
 ## Model builder
 
+### TRAINING
+
+This script is used to train new models from scratch. This is an example of a command
+to train an 8x8 Rydberg lattice with a patched transformer:
+
+```
+python ModelBuilder.py L=64 NLOOPS=16 sgrad=False steps=4000 --ptf _2D=True patch=2
+```
+
+Training parameters are shown when running:
+
+```
+python ModelBuilder.py --help --training
+```
+
+```
+Training Arguments:
+
+    L          (int)     -- Total lattice size (8x8 would be L=64)
+
+    Q          (int)     -- Number of minibatches per batch
+
+    K          (int)     -- size of each minibatch
+
+    B          (int)     -- Total batch size (should be Q*K)
+
+    NLOOPS     (int)     -- Number of loops within the off_diag_labels function. Higher values save ram and
+                            generally makes the code run faster (up to 2x). Note, you can only set this
+                            as high as your effective sequence length. (Take L and divide by your patch size).
+
+    steps      (int)     -- Number of training steps
+
+    dir        (str)     -- Output directory, set to <NONE> for no output
+
+    lr         (float)   -- Learning rate
+
+    kl         (float)   -- loss term for kl divergence
+
+    sgrad      (bool)    -- whether or not to sample with gradients.
+                            (Uses less ram when but slightly slower)
+
+    hamiltonian (str)    -- which hamiltonian to use
+```
+
 ### RNN
 
 All optional rnn parameters can be viewed by running 
