@@ -79,7 +79,8 @@ def build_model(args):
         #make lptf model and global settings
         model = torch.jit.script(LPTF(subsampler,**lptf_opt.__dict__))
         full_opt = Options(train=train_opt.__dict__,model=lptf_opt.__dict__,
-                           submodel=sub_opt.__dict__,hamiltonian=HAMILTONIAN)
+                           submodel=sub_opt.__dict__,hamiltonian=HAMILTONIAN.__dict__)
+        #print(full_opt)
     else:
         #set model to submodel and create global settings
         full_opt = Options(train=train_opt.__dict__,model=sub_opt.__dict__,hamiltonian=HAMILTONIAN.__dict__)
@@ -134,7 +135,7 @@ if __name__=="__main__":
         betas=(beta1,beta2)
         )
 
-        print(train_opt)
+        print(full_opt)
         mydir=setup_dir(opt_dict)
         orig_stdout = sys.stdout
 
