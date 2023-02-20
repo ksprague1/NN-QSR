@@ -112,7 +112,7 @@ PTF Optional arguments:
 
     num_layers (int)     -- The number of transformer layers to use
 
-    nheads     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
+    nhead     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
 
 ```
 
@@ -145,7 +145,7 @@ LPTF Optional arguments:
 
     num_layers (int)     -- The number of transformer layers to use
 
-    nheads     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
+    nhead     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
 
     subsampler (Sampler) -- The inner model to use for probability factorization. This is set implicitly
                             by including --rnn or --ptf arguments.
