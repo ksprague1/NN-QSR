@@ -47,7 +47,7 @@ class Options:
             out+=line+" "
         return out[:-1]
     
-    def apply(self,args):
+    def apply(self,args,warn=True):
         """Takes in a tuple of command line arguments and turns them into options
         Inputs:
             args (tuple<str>) - Your command line arguments
@@ -58,6 +58,8 @@ class Options:
             try:
                 key,val=arg.split("=")
                 kwargs[key]=self.cmd_cast(val)
+                if warn and (not key in self.__dict__):
+                    print("Unknown Argument: %s"%key)
             except:pass
         self.__dict__.update(kwargs)
     def cmd_cast(self,x0):

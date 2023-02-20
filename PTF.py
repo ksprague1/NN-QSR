@@ -284,7 +284,7 @@ class PTF(Sampler):
         
         num_layers (int)     -- The number of transformer layers to use
         
-        nheads     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
+        nhead     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
     
     """
     
