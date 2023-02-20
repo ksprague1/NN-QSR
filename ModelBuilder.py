@@ -6,74 +6,92 @@ def build_model(args):
     
     A cmd call should look like this
     
-    >>> python ModelBuilder.py <name>=<value> --<network> <name>=<value>
+    >>> python ModelBuilder.py --<param1> <name11>=<value11> <name12>=<value12> --<param2> <name21>=<value21> <name22>=<value22> . . .
     
     Ex: A Patched Transformer with 2x2 patches, system total size of 8x8, a batch size of K*Q=1024 and 16 loops when calculating
         the off diagonal probabilities to save on memory:
     
-    >>> python ModelBuilder.py L=64 NLOOPS=16 K=1024 patch=2x2 --ptf _2D=True patch=2
+    >>> python ModelBuilder.py --train L=64 NLOOPS=16 K=1024 sub_directory=2x2 --ptf _2D=True patch=2
     
     Ex2: A Large Patched Transformer using an RNN subsampler with 3x3 patches on the LPTF and 1D patches of size 3 on the RNN
     
-    >>> python ModelBuilder.py L=576 NLOOPS=64 patch=3x3B --lptf _2D=True patch=3 --rnn L=9 _2D=False patch=3 Nh=128
+    >>> python ModelBuilder.py --train L=576 NLOOPS=64 sub_directory=3x3 --lptf _2D=True patch=3 --rnn L=9 _2D=False patch=3 Nh=128
     
     """
-    is_lptf=False
-    split0=split1=len(args)
-    if "--lptf" in args:
-        split0=args.index("--lptf")
-        is_lptf=True
-        train_opt=TrainOpt(K=256,Q=1,dir="LPTF")
-    if "--rnn" in args:
-        split1=args.index("--rnn")
-        
-        SMODEL=PRNN
-        if not is_lptf:train_opt=TrainOpt(K=512,Q=1,dir="RNN")
-    if "--ptf" in args:
-        split1=args.index("--ptf")
-        SMODEL=PTF
-        if not is_lptf:train_opt=TrainOpt(K=256,Q=1,dir="PTF")
+    
 
+    options_dict = OptionManager.parse_cmd(args)
+    is_lptf= ("LPTF" in options_dict)
+    all_models=dict(RNN=PRNN,LPTF=LPTF,PTF=PTF)
+    
+    
+    if not "TRAIN" in options_dict:
+        options_dict["TRAIN"]=None
+        for name in options_dict:
+            if name in all_models and (not is_lptf or name=="LPTF"):
+                options_dict["TRAIN"] = TrainOpt(L=options_dict[name].L)
+                
+    HAMILTONIAN = None
+    for name in options_dict:
+        #make sure system size is consistent among all options
+        if name == "LPTF" or is_lptf==False:
+            options_dict[name].L=options_dict["TRAIN"].L
+            if options_dict["TRAIN"].dir == "out" and name in all_models:
+                options_dict["TRAIN"].dir=name
+        #make sure hamiltonians have correct system size
+        if (not name in all_models and name != "TRAIN"):
+            options_dict[name].L=options_dict["TRAIN"].L
+            HAMILTONIAN = options_dict[name]
+            options_dict[name].name=name
+            if name=="RYDBERG":
+                h=options_dict[name]
+                if h.Lx*h.Ly!=h.L:
+                    h.Lx=h.Ly=int(h.L**0.5)
+        #set model type
+        if name in all_models:
+            options_dict[name].model_name=all_models[name].__name__
+            if not is_lptf or name!="LPTF":
+                SMODEL,sub_opt = all_models[name],options_dict[name]
+                
+    #Special case for no hamiltonian specified
+    if HAMILTONIAN is None: 
+        HAMILTONIAN=h=Rydberg.DEFAULTS.copy()
+        if h.Lx*h.Ly!=h.L:h.Lx=h.Ly=int(h.L**0.5)
         
-    #Initialize default options
-    sub_opt=SMODEL.DEFAULTS.copy()
+    options_dict["HAMILTONIAN"]=HAMILTONIAN
     
-    
-    # Update options with command line arguments
-    split0=min(split0,split1)
-    train_opt.apply(args[:split0])
-    sub_opt.apply(args[split1+1:])
-    
-    #Add in extra info to options
-    sub_opt.model_name=SMODEL.__name__
+    #Make sure batch size makes sense
+    train_opt=options_dict["TRAIN"]
     train_opt.B=train_opt.K*train_opt.Q
-    #extra condition on the PTF to make the conditioned sampling work
-    if SMODEL==PTF and is_lptf:sub_opt.Nh=[sub_opt.Nh,train_opt.Nh]
     
     # Build models
     #for the lptf we need to have a model and submodel
     if is_lptf:
+        lptf_opt=options_dict["LPTF"]
+        #extra condition on the PTF to make the conditioned sampling work
+        if SMODEL==PTF:
+            sub_opt.Nh=[sub_opt.Nh,lptf_opt.Nh]
+        else:
+            sub_opt.Nh = lptf_opt.Nh
+        
         subsampler = SMODEL(**sub_opt.__dict__)
         #set lptf options
-        lptf_opt=LPTF.DEFAULTS.copy()
-        lptf_opt.model_name=LPTF.__name__
-        lptf_opt.apply(args[split0+1:split1])
-        print(args[split0+1:split1])
         #make lptf model and global settings
-        model = torch.jit.script(LPTF(subsampler,train_opt.L,**lptf_opt.__dict__))
-        full_opt = Options(train=train_opt.__dict__,model=lptf_opt.__dict__,submodel=sub_opt.__dict__)
+        model = torch.jit.script(LPTF(subsampler,**lptf_opt.__dict__))
+        full_opt = Options(train=train_opt.__dict__,model=lptf_opt.__dict__,
+                           submodel=sub_opt.__dict__,hamiltonian=HAMILTONIAN)
     else:
         #set model to submodel and create global settings
-        full_opt = Options(train=train_opt.__dict__,model=sub_opt.__dict__)
-        model = torch.jit.script(SMODEL(train_opt.L,**sub_opt.__dict__))
+        full_opt = Options(train=train_opt.__dict__,model=sub_opt.__dict__,hamiltonian=HAMILTONIAN.__dict__)
+        model = torch.jit.script(SMODEL(**sub_opt.__dict__))
         
-    return model,full_opt,train_opt
+    return model,full_opt,options_dict
 
 def helper(args):
     
     help(build_model)
     
-    example = "Runtime Example:\n>>>python ModelBuilder.py L=64"
+    example = "Runtime Example:\n>>>python ModelBuilder.py --rydberg --train L=64"
     while True:
         if "--lptf" in args:
             print(LPTF.INFO)
@@ -87,7 +105,7 @@ def helper(args):
             print(PTF.INFO)
             print(example+" --ptf _2D=True patch=2")
             break
-        if "--training" in args:
+        if "--train" in args:
             print(TrainOpt.__doc__)
             print(example+" NLOOPS=16 sgrad=False steps=4000 --ptf _2D=True patch=2")
             break
@@ -106,8 +124,8 @@ if __name__=="__main__":
     else:
         print(sys.argv[1:])
         
-        model,full_opt,train_opt = build_model(sys.argv[1:])
-
+        model,full_opt,opt_dict = build_model(sys.argv[1:])
+        train_opt=opt_dict["TRAIN"]
         #Initialize optimizer
         beta1=0.9;beta2=0.999
         optimizer = torch.optim.Adam(
@@ -117,7 +135,7 @@ if __name__=="__main__":
         )
 
         print(train_opt)
-        mydir=setup_dir(train_opt)
+        mydir=setup_dir(opt_dict)
         orig_stdout = sys.stdout
 
         full_opt.save(mydir+"\\settings.json")
@@ -125,7 +143,7 @@ if __name__=="__main__":
         f = open(mydir+'\\output.txt', 'w')
         sys.stdout = f
         try:
-            reg_train(train_opt,(model,optimizer),printf=True,mydir=mydir)
+            reg_train(opt_dict,(model,optimizer),printf=True,mydir=mydir)
         except Exception as e:
             print(e)
             sys.stdout = orig_stdout

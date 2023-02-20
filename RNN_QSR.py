@@ -112,6 +112,35 @@ class Options:
     def copy(self):
         return Options(**self.__dict__)
 
+
+class OptionManager():
+    
+    registry = dict()
+    @staticmethod
+    def register(name: str , opt: Options):
+        OptionManager.registry[name.upper()] = opt
+    
+    @staticmethod
+    def parse_cmd(args: list) -> dict:
+        output=dict()
+        sub_args=[]
+        for arg in args[::-1]:
+            # --name Signifies a new set of options
+            if arg[:2] == "--":
+                arg=arg.upper()
+                #make sure the name is registered
+                if not arg[2:] in OptionManager.registry:
+                    raise Exception("Argument %s Not Registered"%arg)
+                #copy the defaults and apply the new options
+                opt = OptionManager.registry[arg[2:]].copy()
+                opt.apply(sub_args)
+                output[arg[2:]] = opt
+                # Reset the collection of arguments
+                sub_args=[]
+            #otherwise keep adding options
+            else:
+                sub_args+=[arg]
+        return output
 # In[2]:
 
 
@@ -194,7 +223,9 @@ class Hamiltonian():
 class Rydberg(Hamiltonian):
     E={16:-0.4534,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687,2304:-0.3645}
     Err = {16: 0.0001,36: 0.0005,64: 0.0002, 144: 0.0002, 256: 0.0002, 576: 0.0006,1024: 0.0007,2304: 0.0007}
-    def __init__(self,Lx,Ly,V=7.0,Omega=1.0,delta=1.0,device=device):
+    
+    DEFAULTS = Options(Lx=4,Ly=4,V=7.0,Omega=1.0,delta=1.0)
+    def __init__(self,Lx,Ly,V,Omega,delta,device=device,**kwargs):
         self.Lx       = Lx              # Size along x
         self.Ly       = Ly              # Size along y
         self.V        = V               # Van der Waals potential
@@ -230,13 +261,15 @@ class Rydberg(Hamiltonian):
     def ground(self):
         return Rydberg.E[self.Lx*self.Ly]
 
-
+OptionManager.register("rydberg",Rydberg.DEFAULTS)
 # In[5]:
 
 
 class TFIM(Hamiltonian):
     """Implementation of the Transverse field Ising model with Periodic Boundary Conditions"""
-    def __init__(self,L,h_x,J=1.0,device=device):
+    
+    DEFAULTS=Options(L=16,h_x=-1.0,J=1.0)
+    def __init__(self,L,h_x,J,device=device,**kwargs):
         self.J = J
         self.h=h_x
         super(TFIM,self).__init__(L,h_x,device)
@@ -263,7 +296,7 @@ class TFIM(Hamiltonian):
         E0 = -1/N*np.sum(np.sqrt(1+h**2-2*h*np.cos(Pn)))
         return E0*self.J
 
-
+OptionManager.register("tfim",TFIM.DEFAULTS)
 # In[6]:
 
 
@@ -457,7 +490,7 @@ class PRNN(Sampler):
         rnntype    (string)  -- Which type of RNN cell to use. Only ELMAN and GRU are valid options at the moment
     """
     
-    DEFAULTS=Options(patch=1,_2D=False,rnntype="GRU",Nh=256)
+    DEFAULTS=Options(L=16,patch=1,_2D=False,rnntype="GRU",Nh=256)
     TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
     def __init__(self,L,patch,_2D,rnntype,Nh,device=device, **kwargs):
         
@@ -664,7 +697,7 @@ class PRNN(Sampler):
                 
         return probs
 
-
+OptionManager.register("rnn",PRNN.DEFAULTS)
 
 
 def new_rnn_with_optim(rnntype,op,beta1=0.9,beta2=0.999):
@@ -705,24 +738,24 @@ def mkdir(dir_):
     except:return -1
     return 0
 
-def setup_dir(op):
+def setup_dir(op_dict):
     """Makes directory for output and saves the run settings there
     Inputs: 
-        op (Opt) - Options object
+        op_dict (dict) - Dictionary of Options objects
     Outputs:
         Output directory mydir
     
     """
+    op=op_dict["TRAIN"]
+    
     if op.dir=="<NONE>":
         return
-    mydir= op.dir+"/%s/%d-B=%d-K=%d"%(op.hamiltonian,op.L,op.B,op.K)
-    if op.hamiltonian == "TFIM":
-        mydir+=("-h=%.1f"%op.h)
-    if "patch" in op.__dict__:
-        mydir+="-P=%s"%op.patch
-    mkdir(op.dir)
-    mkdir(op.dir+"/%s"%op.hamiltonian)
-    mkdir(mydir)
+    
+    hname = op_dict["HAMILTONIAN"].name if "HAMILTONIAN" in op_dict else "NA"
+    
+    mydir= op.dir+"/%s/%d-B=%d-K=%d%s"%(hname,op.L,op.B,op.K,op.sub_directory)
+
+    os.makedirs(mydir,exist_ok = True)
     biggest=-1
     for paths,folders,files in os.walk(mydir):
         for f in folders:
@@ -731,9 +764,7 @@ def setup_dir(op):
             
     mydir+="/"+str(biggest+1)
     mkdir(mydir)
-        
-    with open(mydir+"/settings.txt","w") as f:
-        f.write(str(op)+"\n")
+    
     print("Output folder path established")
     return mydir
 
@@ -763,38 +794,45 @@ class TrainOpt(Options):
         
         sgrad      (bool)    -- whether or not to sample with gradients. 
                                 (Uses less ram when but slightly slower)
+                                
+        sub_directory (str)  -- String to add to the end of the output directory (inside a subfolder)
         
-        hamiltonian (str)    -- which hamiltonian to use
     """
     def get_defaults(self):
-        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=12000,dir="out",lr=5e-4,kl=0.0,sgrad=False)
+        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,steps=12000,dir="out",lr=5e-4,kl=0.0,sgrad=False,sub_directory="")
 
+    
+OptionManager.register("train",TrainOpt())
+    
 import sys
-def reg_train(op,to=None,printf=False,mydir=None):
+def reg_train(op,net_optim=None,printf=False,mydir=None):
   try:
+    
+    if "RYDBERG" in op:
+        h = Rydberg(**op["RYDBERG"].__dict__)
+    elif "TFIM" in op:
+        #hope for the best here since there aren't defaults
+        h = TFIM(**op["TFIM"].__dict__)
+    else:        
+        h_opt=Rydberg.DEFAULTS.copy()
+        h_opt.Lx=h_opt.Ly=int(op["TRAIN"].L**0.5)
+        h = Rydberg(**h_opt.__dict__)
+    
+    
     
     if mydir==None:
         mydir = setup_dir(op)
     
-    if type(to)==type(None):
+    
+    op=op["TRAIN"]
+    
+    if type(net_optim)==type(None):
         net,optimizer=new_rnn_with_optim("GRU",op)
     else:
-        net,optimizer=to
+        net,optimizer=net_optim
 
 
-    if op.hamiltonian=="Rydberg":
-        # Hamiltonian parameters
-        N = op.L   # Total number of atoms
-        V = 7.0     # Strength of Van der Waals interaction
-        Omega = 1.0 # Rabi frequency
-        delta = 1.0 # Detuning 
-        
-        Lx=Ly=int(op.L**0.5)
-        op.L=Lx*Ly
-        h = Rydberg(Lx,Ly,V,Omega,delta)
-    else:
-        #hope for the best here since there aren't defaults
-        h = TFIM(op.L,op.h,op.J)
+
     exact_energy = h.ground()
     print(exact_energy,op.L)
 

@@ -288,7 +288,7 @@ class PTF(Sampler):
     
     """
     
-    DEFAULTS=Options(patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
+    DEFAULTS=Options(L=16,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
     def __init__(self,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
@@ -579,7 +579,7 @@ class PTF(Sampler):
                 
         return probs
 
-    
+OptionManager.register("ptf",PTF.DEFAULTS)
     
     
 if __name__=="__main__":        

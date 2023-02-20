@@ -55,7 +55,7 @@ class LPTF(Sampler):
                                 by including --rnn or --ptf arguments.
     
     """
-    DEFAULTS=Options(patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
+    DEFAULTS=Options(L=64,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
     def __init__(self,subsampler,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
@@ -276,7 +276,7 @@ class LPTF(Sampler):
                 
         return probs
     
-    
+OptionManager.register("lptf",LPTF.DEFAULTS) 
 
 if __name__=="__main__":        
     import sys
