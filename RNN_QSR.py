@@ -844,36 +844,41 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
 
     # In[17]:
 
-    samplequeue = torch.zeros([op.B,op.L,1],device=device)
-    sump_queue=torch.zeros([op.B],device=device)
-    sqrtp_queue=torch.zeros([op.B],device=device)
+    #samples
+    samplebatch = torch.zeros([op.B,op.L,1],device=device)
+    #sum of off diagonal labels for each sample (scaled)
+    sump_batch=torch.zeros([op.B],device=device)
+    #scaling factors for the off-diagonal sums
+    sqrtp_batch=torch.zeros([op.B],device=device)
 
-    def fill_queue():
+    def fill_batch():
         for i in range(op.Q):
-            if op.sgrad:
+            #Only use gradients if you can fill the whole batch
+            if op.sgrad and op.Q==1:
                 sample,logp = net.sample(op.K,op.L)
             else:
               with torch.no_grad():
                 sample,logp = net.sample(op.K,op.L)
+            #get the off diagonal info
             sump,sqrtp = net.off_diag_labels_summed(sample,nloops=op.NLOOPS)
-            samplequeue[i*op.K:(i+1)*op.K]=sample
-            sump_queue[i*op.K:(i+1)*op.K]=sump
-            sqrtp_queue[i*op.K:(i+1)*op.K]=sqrtp
+            samplebatch[i*op.K:(i+1)*op.K]=sample
+            sump_batch[i*op.K:(i+1)*op.K]=sump
+            sqrtp_batch[i*op.K:(i+1)*op.K]=sqrtp
         return logp
     i=0
     t=time.time()
     for x in range(op.steps):
         
         #gather samples and probabilities
-        logp = fill_queue()
+        logp = fill_batch()
                 
-        # get probability labels for the Q>1 case
+        # recompute probability in the case where you sampled without gradients
         if op.Q!=1 or not op.sgrad:
-            logp=net.logprobability(samplequeue)
+            logp=net.logprobability(samplebatch)
 
         #obtain energy
         with torch.no_grad():
-            E=h.localenergyALT(samplequeue,logp,sump_queue,sqrtp_queue)
+            E=h.localenergyALT(samplebatch,logp,sump_batch,sqrtp_batch)
             #energy mean and variance
             Ev,Eo=torch.var_mean(E)
 
@@ -892,7 +897,7 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
         loss.backward()
         optimizer.step()
 
-        # many repeat values but it keeps the same format as no queue
+        # many repeat values but it keeps the same format as no batch
         debug+=[[Ev.item()**0.5,Eo.item(),Ev.item()**0.5,Eo.item(),loss.item(),Eo.item(),0,time.time()-t]]
 
         if x%500==0:
