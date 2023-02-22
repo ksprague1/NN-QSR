@@ -637,66 +637,65 @@ class PRNN(Sampler):
                 sflip[:,j*self.p+j2] = sample*1.0
                 sflip[:,j*self.p+j2,j,j2] = 1-sflip[:,j*self.p+j2,j,j2]
             
+            
         #compute all of their logscale probabilities
-        with torch.no_grad():
-            
-            data=torch.zeros(sample.shape,device=self.device)
-            
-            data[:,1:]=sample[:,:-1]
-            
-            #add positional encoding and make the cache
-            
-            h=torch.zeros([1,B,self.Nh],device=self.device)
-            
-            out,_=self.rnn(data,h)
-            
-            #cache for the rnn is the output in this sense
-            #shape [B,L//4,Nh]
-            cache=out
-            probs=torch.zeros([B,L],device=self.device)
-            #expand cache to group L//D flipped states
-            cache=cache.unsqueeze(1)
+        data=torch.zeros(sample.shape,device=self.device)
 
-            #this line took like 1 hour to write I'm so sad
-            #the cache has to be shaped such that the batch parts line up
-                        
-            cache=cache.repeat(1,L//D,1,1).reshape(B*L//D,L//self.p,cache.shape[-1])
-                        
-            pred0 = self.lin(out)
-            #shape will be [B,L//4,16]
-            real=genpatch2onehot(sample,self.p)
-            #[B,L//4,16] -> [B,L//4]
-            total0 = torch.sum(real*pred0,dim=-1)
+        data[:,1:]=sample[:,:-1]
 
-            for k in range(D):
+        #add positional encoding and make the cache
 
-                N = k*L//D
-                #next couple of steps are crucial          
-                #get the samples from N to N+L//D
-                #Note: samples are the same as the original up to the Nth spin
-                real = sflip[:,N:(k+1)*L//D]
-                #flatten it out and set to sequence first
-                tmp = real.reshape([B*L//D,L//self.p,self.p])
-                #set up next state predction
-                fsample=torch.zeros(tmp.shape,device=self.device)
-                fsample[:,1:]=tmp[:,:-1]
-                #grab your rnn output
-                if k==0:
-                    out,_=self.rnn(fsample,cache[:,0].unsqueeze(0)*0.0)
-                else:
-                    out,_=self.rnn(fsample[:,N//self.p:],cache[:,N//self.p-1].unsqueeze(0)*1.0)
-                # grab output for the new part
-                output = self.lin(out)
-                # reshape output separating batch from spin flip grouping
-                pred = output.view([B,L//D,(L-N)//self.p,1<<self.p])
-                real = genpatch2onehot(real[:,:,N//self.p:],self.p)
-                total = torch.sum(real*pred,dim=-1)
-                #sum across the sequence for probabilities
-                #print(total.shape,total0.shape)
-                logp=torch.sum(torch.log(total),dim=-1)
-                logp+=torch.sum(torch.log(total0[:,:N//self.p]),dim=-1).unsqueeze(-1)
-                probs[:,N:(k+1)*L//D]=logp
-                
+        h=torch.zeros([1,B,self.Nh],device=self.device)
+
+        out,_=self.rnn(data,h)
+
+        #cache for the rnn is the output in this sense
+        #shape [B,L//4,Nh]
+        cache=out
+        probs=torch.zeros([B,L],device=self.device)
+        #expand cache to group L//D flipped states
+        cache=cache.unsqueeze(1)
+
+        #this line took like 1 hour to write I'm so sad
+        #the cache has to be shaped such that the batch parts line up
+
+        cache=cache.repeat(1,L//D,1,1).reshape(B*L//D,L//self.p,cache.shape[-1])
+
+        pred0 = self.lin(out)
+        #shape will be [B,L//4,16]
+        real=genpatch2onehot(sample,self.p)
+        #[B,L//4,16] -> [B,L//4]
+        total0 = torch.sum(real*pred0,dim=-1)
+
+        for k in range(D):
+
+            N = k*L//D
+            #next couple of steps are crucial          
+            #get the samples from N to N+L//D
+            #Note: samples are the same as the original up to the Nth spin
+            real = sflip[:,N:(k+1)*L//D]
+            #flatten it out and set to sequence first
+            tmp = real.reshape([B*L//D,L//self.p,self.p])
+            #set up next state predction
+            fsample=torch.zeros(tmp.shape,device=self.device)
+            fsample[:,1:]=tmp[:,:-1]
+            #grab your rnn output
+            if k==0:
+                out,_=self.rnn(fsample,cache[:,0].unsqueeze(0)*0.0)
+            else:
+                out,_=self.rnn(fsample[:,N//self.p:],cache[:,N//self.p-1].unsqueeze(0)*1.0)
+            # grab output for the new part
+            output = self.lin(out)
+            # reshape output separating batch from spin flip grouping
+            pred = output.view([B,L//D,(L-N)//self.p,1<<self.p])
+            real = genpatch2onehot(real[:,:,N//self.p:],self.p)
+            total = torch.sum(real*pred,dim=-1)
+            #sum across the sequence for probabilities
+            #print(total.shape,total0.shape)
+            logp=torch.sum(torch.log(total),dim=-1)
+            logp+=torch.sum(torch.log(total0[:,:N//self.p]),dim=-1).unsqueeze(-1)
+            probs[:,N:(k+1)*L//D]=logp
+
         return probs
 
 OptionManager.register("rnn",PRNN.DEFAULTS)
@@ -791,17 +790,17 @@ class TrainOpt(Options):
         dir        (str)     -- Output directory, set to <NONE> for no output
         
         lr         (float)   -- Learning rate
-        
-        kl         (float)   -- loss term for kl divergence
-        
+                
         sgrad      (bool)    -- whether or not to sample with gradients. 
                                 (Uses less ram when but slightly slower)
+                                
+        true_grad  (bool)    -- Set to false to approximate the gradients
                                 
         sub_directory (str)  -- String to add to the end of the output directory (inside a subfolder)
         
     """
     def get_defaults(self):
-        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,steps=12000,dir="out",lr=5e-4,kl=0.0,sgrad=False,sub_directory="")
+        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,steps=12000,dir="out",lr=5e-4,sgrad=False,true_grad=False,sub_directory="")
 
     
 OptionManager.register("train",TrainOpt())
@@ -828,6 +827,8 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
     
     op=op["TRAIN"]
     
+    if op.true_grad:assert op.Q==1
+    
     if type(net_optim)==type(None):
         net,optimizer=new_rnn_with_optim("GRU",op)
     else:
@@ -852,29 +853,38 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
     sqrtp_batch=torch.zeros([op.B],device=device)
 
     def fill_batch():
-        for i in range(op.Q):
-            #Only use gradients if you can fill the whole batch
-            if op.sgrad and op.Q==1:
+        with torch.no_grad():
+            for i in range(op.Q):
                 sample,logp = net.sample(op.K,op.L)
-            else:
-              with torch.no_grad():
-                sample,logp = net.sample(op.K,op.L)
-            #get the off diagonal info
-            sump,sqrtp = net.off_diag_labels_summed(sample,nloops=op.NLOOPS)
-            samplebatch[i*op.K:(i+1)*op.K]=sample
-            sump_batch[i*op.K:(i+1)*op.K]=sump
-            sqrtp_batch[i*op.K:(i+1)*op.K]=sqrtp
+                #get the off diagonal info
+                sump,sqrtp = net.off_diag_labels_summed(sample,nloops=op.NLOOPS)
+                samplebatch[i*op.K:(i+1)*op.K]=sample
+                sump_batch[i*op.K:(i+1)*op.K]=sump
+                sqrtp_batch[i*op.K:(i+1)*op.K]=sqrtp
         return logp
     i=0
     t=time.time()
     for x in range(op.steps):
         
         #gather samples and probabilities
-        logp = fill_batch()
+        
                 
-        # recompute probability in the case where you sampled without gradients
-        if op.Q!=1 or not op.sgrad:
+        if op.Q!=1:
+            fill_batch()
             logp=net.logprobability(samplebatch)
+        else:
+            if op.sgrad:
+                samplebatch,logp = net.sample(op.B,op.L)
+            else:
+                with torch.no_grad():samplebatch,_= net.sample(op.B,op.L)
+                #if you sample without gradients you have to recompute probabilities with gradients
+                logp=net.logprobability(samplebatch)
+            
+            if op.true_grad:
+                sump_batch,sqrtp_batch = net.off_diag_labels_summed(samplebatch,nloops=op.NLOOPS)
+            else:
+                #don't need gradients on the off diagonal when approximating gradients
+                 with torch.no_grad(): sump_batch,sqrtp_batch = net.off_diag_labels_summed(samplebatch,nloops=op.NLOOPS)
 
         #obtain energy
         with torch.no_grad():
@@ -884,10 +894,14 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
 
         ERR  = Eo/(op.L)
         
-        if op.B==1:
-            loss = ((E-op.kl)*logp).mean()
+        if op.true_grad:
+            #get the extra loss term
+            h_x= h.offDiag *sump_batch* torch.exp(sqrtp_batch-logp/2)
+            loss = (logp*E).mean() + h_x.mean()
+            
         else:
-            loss = (E*logp - (Eo+op.kl)*logp).mean()
+            loss =(logp*(E-Eo)).mean()  if op.B>1 else (logp*E).mean()
+
 
         #Main loss curve to follow
         losses.append(ERR.cpu().item())

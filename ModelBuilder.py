@@ -56,6 +56,7 @@ def build_model(args):
     #Special case for no hamiltonian specified
     if HAMILTONIAN is None: 
         HAMILTONIAN=h=Rydberg.DEFAULTS.copy()
+        h.L=options_dict["TRAIN"].L
         if h.Lx*h.Ly!=h.L:h.Lx=h.Ly=int(h.L**0.5)
         
     options_dict["HAMILTONIAN"]=HAMILTONIAN

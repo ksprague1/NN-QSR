@@ -18,18 +18,16 @@ def fill_queue(net,h,E_queue,op):
 
 def make_h(op):
     # Hamiltonian parameters
-    N = op.L   # Total number of atoms
-    V = 7.0     # Strength of Van der Waals interaction
-    Omega = 1.0 # Rabi frequency
-    delta = 1.0 # Detuning 
-
-    if op.hamiltonian=="Rydberg":
-        Lx=Ly=int(op.L**0.5)
-        op.L=Lx*Ly
-        h = Rydberg(Lx,Ly,V,Omega,delta)
-    else:
+    
+    if op.hamiltonian["name"] == "RYDBERG":
+        h = Rydberg(**op.hamiltonian)
+    elif op.hamiltonian["name"] =="TFIM":
         #hope for the best here since there aren't defaults
-        h = TFIM(op.L,op.h,op.J)
+        h = TFIM(**op.hamiltonian)
+    else:        
+        h_opt=Rydberg.DEFAULTS.copy()
+        h_opt.Lx=h_opt.Ly=int(op.train.L**0.5)
+        h = Rydberg(**h_opt.__dict__)
     return h
 
 MODELS = {"LPTF":LPTF,"PTF":PTF,"PRNN":PRNN}
@@ -45,11 +43,13 @@ def load_model(filename,train_opt=None):
         train_opt = Options(**op.train)
     op.train = train_opt.__dict__
     
+    op.model["L"]=op.train["L"]
+    
     if op.model["model_name"]=="LPTF":
         subsampler = MODELS[op.submodel["model_name"]](**op.submodel)
-        net = LPTF(subsampler,train_opt.L,**op.model)
+        net = LPTF(subsampler,**op.model)
     else:
-        net = MODELS[op.model["model_name"]](train_opt.L,**op.model)
+        net = MODELS[op.model["model_name"]](**op.model)
     
     tmp = torch.load(filename+"/T")
     momentum_update(0,net,tmp)
@@ -76,7 +76,7 @@ if __name__=="__main__":
     print(train_opt.K,train_opt.Q,train_opt.B)
     
     
-    h=make_h(train_opt)
+    h=make_h(op)
     E_queue = torch.zeros([train_opt.B],device=device)
     
     fill_queue(net,h,E_queue,train_opt)

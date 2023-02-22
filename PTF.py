@@ -520,63 +520,61 @@ class PTF(Sampler):
         #switch sample into sequence-first
         sample = sample.transpose(1,0)
             
-        #compute all of their logscale probabilities
-        with torch.no_grad():
-            
+        #compute all of their logscale probabilities            
 
-            data=torch.zeros(sample.shape,device=self.device)
-            data[1:]=sample[:-1]
-            
-            #[L//p,B,p] -> [L//p,B,Nh]
-            encoded=self.pe(self.tokenize(data))
-            
-            #add positional encoding and make the cache
-            out,cache=self.transformer.make_cache(encoded)
-            probs=torch.zeros([B,L],device=self.device)
-            #expand cache to group L//D flipped states
-            cache=cache.unsqueeze(2)
+        data=torch.zeros(sample.shape,device=self.device)
+        data[1:]=sample[:-1]
 
-            #this line took like 1 hour to write I'm so sad
-            #the cache has to be shaped such that the batch parts line up
-                        
-            cache=cache.repeat(1,1,L//D,1,1).transpose(2,3).reshape(cache.shape[0],L//self.p,B*L//D,cache.shape[-1])
+        #[L//p,B,p] -> [L//p,B,Nh]
+        encoded=self.pe(self.tokenize(data))
 
-            pred0 = self.lin(out)
-            #shape will be [L//p,B,2^p]
-            real=genpatch2onehot(sample,self.p)
-            #[L//p,B,2^p] -> [B,L//p]
-            total0 = torch.sum(real*pred0,dim=-1).transpose(1,0)
+        #add positional encoding and make the cache
+        out,cache=self.transformer.make_cache(encoded)
+        probs=torch.zeros([B,L],device=self.device)
+        #expand cache to group L//D flipped states
+        cache=cache.unsqueeze(2)
 
-            for k in range(D):
+        #this line took like 1 hour to write I'm so sad
+        #the cache has to be shaped such that the batch parts line up
 
-                N = k*L//D
-                #next couple of steps are crucial          
-                #get the samples from N to N+L//D
-                #Note: samples are the same as the original up to the Nth spin
-                real = sflip[:,N:(k+1)*L//D]
-                #flatten it out and set to sequence first
-                tmp = real.reshape([B*L//D,L//self.p,self.p]).transpose(1,0)
-                #set up next state predction
-                fsample=torch.zeros(tmp.shape,device=self.device)
-                fsample[1:]=tmp[:-1]
-                # put sequence before batch so you can use it with your transformer
-                tgt=self.pe(self.tokenize(fsample))
-                #grab your transformer output
-                out,_=self.transformer.next_with_cache(tgt,cache[:,:N//self.p],N//self.p)
+        cache=cache.repeat(1,1,L//D,1,1).transpose(2,3).reshape(cache.shape[0],L//self.p,B*L//D,cache.shape[-1])
 
-                # grab output for the new part
-                output = self.lin(out[N//self.p:].transpose(1,0))
-                # reshape output separating batch from spin flip grouping
-                pred = output.view([B,L//D,(L-N)//self.p,1<<self.p])
-                real = genpatch2onehot(real[:,:,N//self.p:],self.p)
-                total = torch.sum(real*pred,dim=-1)
-                #sum across the sequence for probabilities
-                
-                #print(total.shape,total0.shape)
-                logp=torch.sum(torch.log(total),dim=-1)
-                logp+=torch.sum(torch.log(total0[:,:N//self.p]),dim=-1).unsqueeze(-1)
-                probs[:,N:(k+1)*L//D]=logp
-                
+        pred0 = self.lin(out)
+        #shape will be [L//p,B,2^p]
+        real=genpatch2onehot(sample,self.p)
+        #[L//p,B,2^p] -> [B,L//p]
+        total0 = torch.sum(real*pred0,dim=-1).transpose(1,0)
+
+        for k in range(D):
+
+            N = k*L//D
+            #next couple of steps are crucial          
+            #get the samples from N to N+L//D
+            #Note: samples are the same as the original up to the Nth spin
+            real = sflip[:,N:(k+1)*L//D]
+            #flatten it out and set to sequence first
+            tmp = real.reshape([B*L//D,L//self.p,self.p]).transpose(1,0)
+            #set up next state predction
+            fsample=torch.zeros(tmp.shape,device=self.device)
+            fsample[1:]=tmp[:-1]
+            # put sequence before batch so you can use it with your transformer
+            tgt=self.pe(self.tokenize(fsample))
+            #grab your transformer output
+            out,_=self.transformer.next_with_cache(tgt,cache[:,:N//self.p],N//self.p)
+
+            # grab output for the new part
+            output = self.lin(out[N//self.p:].transpose(1,0))
+            # reshape output separating batch from spin flip grouping
+            pred = output.view([B,L//D,(L-N)//self.p,1<<self.p])
+            real = genpatch2onehot(real[:,:,N//self.p:],self.p)
+            total = torch.sum(real*pred,dim=-1)
+            #sum across the sequence for probabilities
+
+            #print(total.shape,total0.shape)
+            logp=torch.sum(torch.log(total),dim=-1)
+            logp+=torch.sum(torch.log(total0[:,:N//self.p]),dim=-1).unsqueeze(-1)
+            probs[:,N:(k+1)*L//D]=logp
+
         return probs
 
 OptionManager.register("ptf",PTF.DEFAULTS)
