@@ -2,6 +2,23 @@ from RNN_QSR import *
 from LPTF import *
 
 
+
+INFO="""
+    Runs Inference on a trained network and outputs the result in a text file. It does this by generating multiple batches of samples
+    with energy labels then averaging across all energies
+    
+    A cmd call should look like this
+    
+    >>> python Transfer.py <Model Directory> <Evaluation Samples> <Batch Size>
+    
+    Ex: Running inference on an RNN:
+    
+    >>> python ModelLoader.py DEMO\\RNN 4096 256
+    
+"""
+
+
+
 def errformat(m,s):
     exp = -int(np.floor(np.log(s)/np.log(10)))
     print( str(round(m,exp))+" +/- "+str(round(s,exp)))
@@ -58,7 +75,11 @@ def load_model(filename,train_opt=None):
     
     
 if __name__=="__main__":        
-    import sys
+  import sys
+
+  if "--help" in sys.argv:
+    print(INFO)
+  else:   
     print(sys.argv[1:])
     op=Options()
     filename = sys.argv[1]

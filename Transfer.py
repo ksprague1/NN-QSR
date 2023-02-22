@@ -2,6 +2,18 @@ from ModelBuilder import *
 from ModelLoader import *
 
 
+INFO="""
+    Trains a new network by running inference on a trained network and minimizing KL divergence
+    
+    A cmd call should look like this
+    
+    >>> python Transfer.py <Model Directory> --<param1> <name11>=<value11> <name12>=<value12> --<param2> <name21>=<value21> . . .
+    
+    Ex: A Patched Transformer with 2x2 patches, system total size of 8x8 learning off of a trained RNN:
+    
+    >>> python Transfer.py DEMO\\RNN --train steps=1000 L=64 K=1024 --ptf _2D=True patch=2
+    
+"""
 
 
 def transfer(teacher,student,optim,op,printf=False,mydir=None):
@@ -63,9 +75,12 @@ def transfer(teacher,student,optim,op,printf=False,mydir=None):
     
 
 if __name__=="__main__":        
-    import sys
+  import sys
+
+  if "--help" in sys.argv:
+    print(INFO)
+  else:    
     print(sys.argv[1:])
-        
     #load teacher model
     filename = sys.argv[1]
     teacher,t_opt = load_model(filename)
