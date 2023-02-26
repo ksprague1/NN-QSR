@@ -3,8 +3,7 @@ from LPTF import *
 
 
 
-INFO="""Runs Inference on a trained network and outputs the result in a text file. It does this by generating multiple batches of samples
-    with energy labels then averaging across all energies
+INFO="""Runs Inference on a trained network and outputs the result in a text file. It does this by generating multiple batches of samples with energy labels then averaging across all energies
     
     A cmd call should look like this
     
