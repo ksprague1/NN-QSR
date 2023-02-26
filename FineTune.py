@@ -1,7 +1,6 @@
 from ModelLoader import *
 
-INFO="""
-    Loads a model and resumes training with new training options (i.e a larger system size or a slight alteration to the hamiltonian)
+INFO="""Loads a model and resumes training with new training options (i.e a larger system size or a slight alteration to the hamiltonian)
     
     A cmd call should look like this
     

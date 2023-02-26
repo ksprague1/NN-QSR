@@ -167,8 +167,7 @@ python ModelLoader.py --help
 
 
 ```
-
-    Runs Inference on a trained network and outputs the result in a text file. It does this by generating multiple batches of samples
+Runs Inference on a trained network and outputs the result in a text file. It does this by generating multiple batches of samples
     with energy labels then averaging across all energies
     
     A cmd call should look like this
@@ -193,8 +192,7 @@ python FineTune.py --help
 
 
 ```
-
-    Loads a model and resumes training with new training options (i.e a larger system size or a slight alteration to the hamiltonian)
+Loads a model and resumes training with new training options (i.e a larger system size or a slight alteration to the hamiltonian)
     
     A cmd call should look like this
     
@@ -218,8 +216,7 @@ python Transfer.py --help
 
 
 ```
-
-    Trains a new network by running inference on a trained network and minimizing KL divergence
+Trains a new network by running inference on a trained network and minimizing KL divergence
     
     A cmd call should look like this
     

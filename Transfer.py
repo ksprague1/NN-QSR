@@ -2,8 +2,7 @@ from ModelBuilder import *
 from ModelLoader import *
 
 
-INFO="""
-    Trains a new network by running inference on a trained network and minimizing KL divergence
+INFO="""Trains a new network by running inference on a trained network and minimizing KL divergence
     
     A cmd call should look like this
     
