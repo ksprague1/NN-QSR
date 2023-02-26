@@ -1,12 +1,31 @@
 from ModelLoader import *
 
+INFO="""
+    Loads a model and resumes training with new training options (i.e a larger system size or a slight alteration to the hamiltonian)
+    
+    A cmd call should look like this
+    
+    >>> python FineTune.py <Model Directory> --train <name>=<value> --<hamiltonian name> <name>=<value>
+    
+    Ex: Running inference on an RNN:
+    
+    >>> python FineTune.py DEMO\\RNN --train L=256 NLOOPS=64 K=512 steps=4000 --rydberg Lx=16 Ly=16
+    
+"""
 
 if __name__=="__main__":        
-    import sys
+  import sys
+
+  if "--help" in sys.argv:
+    print(INFO)
+  else:   
+    
     print(sys.argv[1:])
     
     options_dict = OptionManager.parse_cmd(sys.argv[2:])
 
+    if options_dict["TRAIN"].dir =="out":
+        options_dict["TRAIN"].dir="FINE-TUNE"
     
     filename = sys.argv[1]
     model,full_opt = load_model(filename,options_dict["TRAIN"])

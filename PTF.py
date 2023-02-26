@@ -115,6 +115,7 @@ class FastMaskedTransformerEncoder(nn.Module):#(torch.jit.ScriptModule):
         new_cache = torch.stack(new_token_cache, dim=0)
         return output, new_cache
     
+    #UNUSED FOR NOW
     def cross_with_cache(self,q,k,v,cache=None,idx=-1):
         # type: (Tensor,Tensor,Tensor,Optional[Tensor],int) -> Tuple[Tensor,Tensor]
         """Efficiently calculates the next output of a transformer given the vectors Q,K and V as well as
@@ -254,20 +255,17 @@ class PE1D(nn.Module):
 ##########################################################PTF Model#############################################################
 
 class PTF(Sampler):
-    """Note: logprobability IS normalized 
+    """ 
     
     Architexture wise this is how it works:
     
-    You give it a (2D) state and it patches it into groups of 4 (think of a 2x2 cnn filter with stride 2). It then tells you
-    the probability of each potential patch given all previous patches in your sequence using masked attention.
+    You give it a state and it patches it into groups of size p. It then tells you the probability of each potential patch given all previous patches in your sequence using masked attention.
     
-    This model has 16 outputs, which describes the probability distrubition for the nth patch when given the first n-1 patches
+    This model has 2**p outputs, which describes the probability distrubition for the nth patch when given the first n-1 patches
     
     """
     
-    INFO = """
-    
-    Transformer based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is projected into a token with an added positional encoding. The sequence of encoded patches is used as transformer input.
+    INFO = """Transformer based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is projected into a token with an added positional encoding. The sequence of encoded patches is used as transformer input.
     
     PTF Optional arguments:
     
@@ -284,12 +282,13 @@ class PTF(Sampler):
         
         num_layers (int)     -- The number of transformer layers to use
         
-        nhead     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
+        nhead     (int)      -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
     
+        repeat_pre (bool)    -- repeat the precondition instead of projecting it out
     """
     
-    DEFAULTS=Options(L=16,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
-    def __init__(self,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):
+    DEFAULTS=Options(L=16,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8,repeat_pre=False)
+    def __init__(self,L,patch,_2D,Nh,dropout,num_layers,nhead,repeat_pre,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
         p=patch
@@ -297,7 +296,9 @@ class PTF(Sampler):
             Nh = [Nh]*4
             #self.addK=self.addQ=self.addV=nn.Identity()
         else:
-            Nh+=[int(L**2//p**2)*Nh[0]] if _2D else [int(L//p)*Nh[0]]
+            Nh+=[int(L//p**2)*Nh[0]] if _2D else [int(L//p)*Nh[0]]
+            print(Nh)
+            #UNUSED IDEA
             #self.addK=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
             #self.addQ=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
             #self.addV=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
@@ -328,8 +329,10 @@ class PTF(Sampler):
         #misinterperetation on encoder made it so this code does not work
         self.transformer = FastMaskedTransformerEncoder(Nh=Nh[0],dropout=dropout,num_layers=num_layers,nhead=nhead)       
         
+        self.nrepeat = Nh[2]//Nh[1] if repeat_pre else 1
+        
         self.lin = nn.Sequential(
-                nn.Linear(Nh[1],Nh[2]),
+                nn.Linear(Nh[1],(Nh[1] if repeat_pre else Nh[2])),
                 nn.ReLU(),
                 nn.Linear(Nh[0],1<<self.p),
                 nn.Softmax(dim=-1)
@@ -350,12 +353,13 @@ class PTF(Sampler):
         
         self.to(device)
     
-    def mix_tokens(self,token,hidden):
-        qgate = self.addQ(token)
-        kgate = self.addK(hidden)
-        vgate = self.addV(hidden)
-        
-        return token*qgate+hidden*(1-qgate),token*kgate+hidden*(1-kgate),token*vgate+hidden*(1-vgate)
+    #UNUSED function
+    #def mix_tokens(self,token,hidden):
+    #    qgate = self.addQ(token)
+    #    kgate = self.addK(hidden)
+    #    vgate = self.addV(hidden)
+    #    
+    #    return token*qgate+hidden*(1-qgate),token*kgate+hidden*(1-kgate),token*vgate+hidden*(1-vgate)
     
     def set_mask(self, L):
         # type: (int)
@@ -382,6 +386,7 @@ class PTF(Sampler):
         #shape is modified to [L//p,B,p]
         input = self.patch(input.squeeze(-1)).transpose(1,0)
         
+        #The first input should be zeros and the last patch is not used as input
         data=torch.zeros(input.shape,device=self.device)
         data[1:]=input[:-1]
         
@@ -389,16 +394,20 @@ class PTF(Sampler):
         encoded=self.pe(self.tokenize(data))
         
         
-        
-        
         if h0 is not None:
             
             L,B,Nh=encoded.shape
+            #sequence is preconditioned with h0
             h0 = self.lin0(h0)
+            #repeat h0 if necessary
+            h0=h0.repeat(1,1,self.nrepeat)
+            #project out h0
             #[1,B,Nh0] -> [L,B,Nh]
             h=h0.reshape([1,B,Nh,L]).transpose(-1,0).squeeze(-1)
             #output is shape [L//p,B,Nh]
+            #UNUSED IDEA
             #output,_ = self.transformer.cross_with_cache(*self.mix_tokens(encoded,h),None,0)
+            #precondition information is added to the sequence
             output = self.transformer(encoded+h)
             output=self.lin1(output)          
         else:
@@ -406,8 +415,6 @@ class PTF(Sampler):
             output = self.transformer(encoded)
             # [L//p,B,Nh] -> [L//p,B,2^p]
             output = self.lin(output)
-        
-        
         
         
         #real is going to be a onehot with the index of the appropriate patch set to 1
@@ -434,12 +441,16 @@ class PTF(Sampler):
         L=L//self.p
         
         if h0 is not None:
+            
             #h0 is shape [1,B,Nh0], Nh0=L*Nh
+            # Project out the precondition information
             h0 = self.lin0(h0)
+            # repeat it if necessary
+            h0=h0.repeat(1,1,self.nrepeat)
+            
             #[1,B,Nh0] -> [L,B,Nh]
             h0=h0.reshape([1,B,self.transformer.Nh,L]).transpose(-1,0).squeeze(-1)
         
-        #return (torch.rand([B,L,1],device=device)<0.5).to(torch.float32)
         #Sample set will have shape [L/p,B,p]
         #need one extra zero batch at the start for first pred hence input is [L+1,B,1] 
         input = torch.zeros([L+1,B,self.p],device=self.device)
@@ -534,9 +545,7 @@ class PTF(Sampler):
         #expand cache to group L//D flipped states
         cache=cache.unsqueeze(2)
 
-        #this line took like 1 hour to write I'm so sad
-        #the cache has to be shaped such that the batch parts line up
-
+        #the cache has to be repeated along the correct axis
         cache=cache.repeat(1,1,L//D,1,1).transpose(2,3).reshape(cache.shape[0],L//self.p,B*L//D,cache.shape[-1])
 
         pred0 = self.lin(out)

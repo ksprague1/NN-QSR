@@ -474,9 +474,7 @@ class PRNN(Sampler):
     
     """
     
-    INFO = """
-    
-    RNN based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is used to update the RNN hidden state, which (after two Fully Connected layers) is used to get the probability labels.
+    INFO = """RNN based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is used to update the RNN hidden state, which (after two Fully Connected layers) is used to get the probability labels.
     
     RNN Optional arguments:
     
