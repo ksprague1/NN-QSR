@@ -10,16 +10,17 @@ class PTFB(Sampler):
     This model has 16 outputs, which describes the probability distrubition for the nth patch when given the first n-1 patches
     
     """
-    def __init__(self,L,p,_2D=False,device=device,Nh=128,dropout=0.0,num_layers=2,nhead=8, **kwargs):
+    def __init__(self,L,patch,_2D=False,device=device,Nh=128,dropout=0.0,num_layers=2,nhead=8, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
-        
+        p=patch
         if type(Nh) is int:
             Nh = [Nh]*4
         else:
-            Nh+=[int(L**2//p**2)*Nh[0]] if _2D else [int(L//p)*Nh[0]]
+            Nh+=Nh[0:1]#[int(L**2//p**2)*Nh[0]] if _2D else [int(L//p)*Nh[0]]
         
         if _2D:
+            L=int(L**0.5)
             self.pe = PE2D(Nh[0], L//p,L//p,device)
             self.patch=Patch2D(p,L)
             self.L = int(L**2//p**2)
@@ -31,11 +32,11 @@ class PTFB(Sampler):
             self.p = int(p)
             
         self.device=device
-
+        self.nhead=nhead
         #Encoder only transformer
         #misinterperetation on encoder made it so this code does not work
-        self.decoder_layer = nn.TransformerDecoderLayer(d_model=Nh[0], nhead=nhead, dropout=dropout)
-        self.transformer = nn.TransformerDecoder(self.decoder_layer, num_layers=num_layers)   
+        decoder_layer = nn.TransformerDecoderLayer(d_model=Nh[0], nhead=nhead, dropout=dropout)
+        self.transformer = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)   
         self.transformer.Nh=Nh[0]
         
         self.lin = nn.Sequential(
@@ -82,6 +83,7 @@ class PTFB(Sampler):
             self.set_mask(input.shape[1]//self.p)
         #pe should be sequence first [L,B,Nh]
         
+        LB=input.shape[0]
         #shape is modified to [L//p,B,p]
         input = self.patch(input.squeeze(-1)).transpose(1,0)
         
@@ -92,13 +94,29 @@ class PTFB(Sampler):
         encoded=self.pe(data)
  
         if h0 is not None:
-            
+                        
             L,B,Nh=encoded.shape
-            h0 = self.lin0(h0)
-            #[1,B,Nh0] -> [L,B,Nh]
-            h=h0.reshape([1,B,Nh,L]).transpose(-1,0).squeeze(-1)
+            #[?,B,Nh0] -> [?,B,Nh]
+            h = self.lin0(h0)
+            
+            L2,B2,Nh=h.shape
+            
+            #memory mask to ensure you can't look at memory for future spin values
+            #making this mask was fairly tricky. . .
+            memory_mask = torch.log(torch.tril(torch.ones([L2,L2],device=self.device)))[-LB//B2:]
+            
+            memory_mask = memory_mask.unsqueeze(-1).unsqueeze(1).unsqueeze(1)
+            
+            memory_mask=memory_mask.repeat(1,B2,self.nhead,1,encoded.shape[0])
+        
+            memory_mask=memory_mask.reshape([LB*self.nhead,L2,encoded.shape[0]]).transpose(2,1)
+            
+            h = h.unsqueeze(1).repeat(1,LB//B2,1,1).reshape([L2,LB,Nh])
+            
+            
+            #h=h0.reshape([1,B,Nh,L]).transpose(-1,0).squeeze(-1)
             #output is shape [L//p,B,Nh]
-            output = self.transformer(tgt=encoded, memory=h, tgt_mask=self.mask)
+            output = self.transformer(tgt=encoded, memory=h, tgt_mask=self.mask,memory_mask=memory_mask)
             #output,_ = self.transformer.cross_with_cache(encoded,encoded,encoded,None,0)
             output=self.lin1(output)          
         else:
@@ -133,11 +151,11 @@ class PTFB(Sampler):
         #length is divided by four due to patching
         L=L//self.p
         
-        if h0 is not None:
-            #h0 is shape [1,B,Nh0], Nh0=L*Nh
+        if h0 is not None:            
+            #[?,B,Nh0] -> [?,B,Nh]
             h0 = self.lin0(h0)
-            #[1,B,Nh0] -> [L,B,Nh]
-            h0=h0.reshape([1,B,self.transformer.Nh,L]).transpose(-1,0).squeeze(-1)
+            
+            #h0=h0.reshape([1,B,self.transformer.Nh,L]).transpose(-1,0).squeeze(-1)
         
         #return (torch.rand([B,L,1],device=device)<0.5).to(torch.float32)
         #Sample set will have shape [L/p,B,p]

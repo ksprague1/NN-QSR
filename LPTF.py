@@ -53,8 +53,8 @@ class LPTF(Sampler):
                                 by including --rnn or --ptf arguments.
     
     """
-    DEFAULTS=Options(L=64,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
-    def __init__(self,subsampler,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):
+    DEFAULTS=Options(L=64,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8,full_seq=False)
+    def __init__(self,subsampler,L,patch,_2D,Nh,dropout,num_layers,nhead,full_seq,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
         p=patch
@@ -77,6 +77,7 @@ class LPTF(Sampler):
                 nn.Tanh()
         )
             
+        self.allh=full_seq
             
         self.device=device
         #Encoder only transformer
@@ -122,8 +123,11 @@ class LPTF(Sampler):
         output = self.transformer(encoded)
         
         Lp,B,Nh=output.shape
-        # [L//p,B,Nh] -> [1,L//p*B,Nh]
-        h0 = output.view([1,Lp*B,Nh])
+        if self.allh:
+            h0 = output
+        else:
+            # [L//p,B,Nh] -> [1,L//p*B,Nh]
+            h0 = output.view([1,Lp*B,Nh])
         flattened_input = input.reshape([Lp*B,self.p])
         # [L//p*B,p],[1,L//p*B,Nh] -> [L//p,B]
         logsubsample = self.subsampler.logprobability(flattened_input,h0).view([Lp,B])
@@ -159,7 +163,10 @@ class LPTF(Sampler):
             #Get transformer output (shape [l,B,Nh])
             output,cache = self.transformer.next_with_cache(encoded_input,cache)
             #get state and probability by sampling from the subsample (pass along the last elem reshaped to [1,B,Nh])
-            sample,logsubsample = self.subsampler.sample(B,self.p,output[-1].view([1,B,output.shape[-1]]))
+            if self.allh:
+                sample,logsubsample = self.subsampler.sample(B,self.p,output)
+            else:
+                sample,logsubsample = self.subsampler.sample(B,self.p,output[-1].view([1,B,output.shape[-1]]))
             #Add your logscale conditional probability to the sum
             logp+=logsubsample
             #set input to the sample that was actually chosen
@@ -221,8 +228,12 @@ class LPTF(Sampler):
         cache=cache.repeat(1,1,L//D,1,1).transpose(2,3).reshape(cache.shape[0],L//self.p,B*L//D,cache.shape[-1])
 
         Lp,B,Nh=out.shape
-        # [L//p,B,Nh] -> [1,L//p*B,Nh]
-        h0 = out.view([1,Lp*B,Nh])
+        
+        if self.allh:
+            h0 = out
+        else:
+            # [L//p,B,Nh] -> [1,L//p*B,Nh]
+            h0 = out.view([1,Lp*B,Nh])
         #flatten the batch & sequence dimensions into the batch dimension
         flattened_input = sample.reshape([Lp*B,self.p])
         # [L//p*B,p],[1,L//p*B,Nh] -> [L//p,B]
@@ -250,8 +261,11 @@ class LPTF(Sampler):
             #[(L-N)/p,B*L/D,Nh]
             Lp2,B2,Nh=output.shape
 
-            # [(L-N)/p,B*L/D,Nh] -> [1,((L-N)/p)*(B*L/D),Nh]
-            h0 = output.view([1,Lp2*B2,Nh])
+            if self.allh:
+                h0 = out
+            else:
+                # [(L-N)/p,B*L/D,Nh] -> [1,((L-N)/p)*(B*L/D),Nh]
+                h0 = output.view([1,Lp2*B2,Nh])
             #flatten the batch & sequence dimensions into the batch dimension
             flattened_input = tmp[N//self.p:].reshape([Lp2*B2,self.p])
             
