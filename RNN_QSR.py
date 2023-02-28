@@ -374,19 +374,25 @@ class Sampler(nn.Module):
         sumsqrtp = torch.exp(probs/2-logsqrtp.unsqueeze(1)).sum(dim=1)
         return sumsqrtp,logsqrtp
     
-    
-
 
 
 # In[8]: Functions for making Patches & doing probability traces
 class Patch2D(nn.Module):
-    def __init__(self,n,Lx):
+    def __init__(self,nx,ny,Lx,Ly,device=device):
         super().__init__()
-        self.n=n
+        self.nx=nx
+        self.ny=ny
+        self.Ly=Ly
         self.Lx=Lx
+        
+        #construct an index tensor for the reverse operation
+        indices = torch.arange(Lx*Ly,device=device).unsqueeze(0)
+        self.mixed = self.forward(indices).reshape([Lx*Ly])
+        
+        
     def forward(self,x):
         # type: (Tensor) -> Tensor
-        n,Lx=self.n,self.Lx
+        nx,ny,Lx,Ly=self.nx,self.ny,self.Lx,self.Ly
         """Unflatten a tensor back to 2D, break it into nxn chunks, then flatten the sequence and the chunks
             Input:
                 Tensor of shape [B,L]
@@ -395,7 +401,7 @@ class Patch2D(nn.Module):
         """
         #make the input 2D then break it into 2x2 chunks 
         #afterwards reshape the 2x2 chunks to vectors of size 4 and flatten the 2d bit
-        return x.view([x.shape[0],Lx,Lx]).unfold(-2,n,n).unfold(-2,n,n).reshape([x.shape[0],int(Lx*Lx//n**2),int(n**2)])
+        return x.view([x.shape[0],Lx,Ly]).unfold(-2,nx,nx).unfold(-2,ny,ny).reshape([x.shape[0],int(Lx*Ly//(nx*ny)),nx*ny])
 
     def reverse(self,x):
         # type: (Tensor) -> Tensor
@@ -405,11 +411,11 @@ class Patch2D(nn.Module):
             Output:
                 Tensor of shape [B,L]
         """
-        n,Lx=self.n,self.Lx
-        # original sequence order can be retrieved by chunking twice more
-        #in the x-direction you should have chunks of size 2, but in y it should
-        #be chunks of size Ly//2
-        return x.unfold(-2,Lx//n,Lx//n).unfold(-2,n,n).reshape([x.shape[0],Lx*Lx])
+        Ly,Lx=self.Ly,self.Lx
+        # Reversing is done with an index tensor because torch doesn't have an inverse method for unfold
+        return x.reshape([x.shape[0],Ly*Lx])[:,self.mixed]
+    
+    
     
 class Patch1D(nn.Module):
     def __init__(self,n,L):
@@ -482,29 +488,29 @@ class PRNN(Sampler):
     
         Nh         (int)     -- RNN hidden size
     
-        patch      (int)     -- Number of atoms input/predicted at once (patch size).
-                                The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-    
+        patch      (str)     -- Number of atoms input/predicted at once (patch size).
+                                The Input sequence will have an effective length of L/prod(patch)
+                                Example values: 2x2, 2x3, 2, 4
+        
         rnntype    (string)  -- Which type of RNN cell to use. Only ELMAN and GRU are valid options at the moment
     """
     
-    DEFAULTS=Options(L=16,patch=1,_2D=False,rnntype="GRU",Nh=256)
+    DEFAULTS=Options(L=16,patch=1,rnntype="GRU",Nh=256)
     TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
-    def __init__(self,L,patch,_2D,rnntype,Nh,device=device, **kwargs):
+    def __init__(self,L,patch,rnntype,Nh,device=device, **kwargs):
         
         super(PRNN, self).__init__(device=device)
-        p=patch
-        if _2D:
+        if type(patch)==str and len(patch.split("x"))==2:
+            px,py = [int(a) for a in patch.split("x")]
             L=int(L**0.5)
-            self.patch=Patch2D(p,L)
-            self.L = int(L**2//p**2)
-            self.p=int(p**2)
+            self.patch=Patch2D(px,py,L,L)
+            self.L = int(L**2//(px*py))
+            self.p=px*py
         else:
+            p=int(patch)
             self.patch=Patch1D(p,L)
             self.L = int(L//p)
-            self.p = int(p)
+            self.p = p
         
         assert rnntype!="LSTM"
         #rnn takes input shape [B,L,1]
