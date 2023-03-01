@@ -170,11 +170,9 @@ delta                         			1.0
 ```
 ### TFIM
 ```
-Lx                            			4
-Ly                            			4
-V                             			7.0
-Omega                         			1.0
-delta                         			1.0
+L                             			16
+h_x                           			-1.0
+J                             			1.0
 
 ```
 
