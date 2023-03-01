@@ -388,7 +388,8 @@ class Patch2D(nn.Module):
         #construct an index tensor for the reverse operation
         indices = torch.arange(Lx*Ly,device=device).unsqueeze(0)
         self.mixed = self.forward(indices).reshape([Lx*Ly])
-        
+        #inverse
+        self.mixed=torch.argsort(self.mixed)
         
     def forward(self,x):
         # type: (Tensor) -> Tensor
