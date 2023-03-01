@@ -40,9 +40,7 @@ class LPTF(Sampler):
     
         patch      (int)     -- Number of atoms input/predicted at once (patch size).
                                 The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-        
+            
         dropout    (float)   -- The amount of dropout to use in the transformer layers
         
         num_layers (int)     -- The number of transformer layers to use
@@ -53,23 +51,26 @@ class LPTF(Sampler):
                                 by including --rnn or --ptf arguments.
     
     """
-    DEFAULTS=Options(L=64,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8,full_seq=False)
-    def __init__(self,subsampler,L,patch,_2D,Nh,dropout,num_layers,nhead,full_seq,device=device, **kwargs):
+    DEFAULTS=Options(L=64,patch=1,Nh=128,dropout=0.0,num_layers=2,nhead=8,full_seq=False)
+    def __init__(self,subsampler,L,patch,Nh,dropout,num_layers,nhead,full_seq,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
-        p=patch
-        
-        if _2D:
-            L=int(L**0.5)
-            self.pe = PE2D(Nh, L//p,L//p,device)
-            self.patch=Patch2D(p,L)
-            self.L = int(L**2//p**2)
-            self.p=int(p**2)
+        if type(patch)==str and len(patch.split("x"))==2:
+            #patch and system sizes
+            px,py = [int(a) for a in patch.split("x")]
+            Lx,Ly=[int(L**0.5)]*2 if type(L) is int else [int(a) for a in L.split("x")]
+            #token size and positional encoder
+            self.pe = PE2D(Nh, Lx//px,Ly//py,device)
+            #patching, sequence length and total patch size
+            self.patch=Patch2D(px,py,Lx,Ly)
+            self.L = int(L//(px*py))
+            self.p=px*py
         else:
-            self.pe = PE1D(Nh,L//p,device)
+            p=int(patch)
+            self.pe = PE1D(Nh[0],L//p,device)
             self.patch=Patch1D(p,L)
             self.L = int(L//p)
-            self.p = int(p)
+            self.p = p
             
 
         self.tokenize=nn.Sequential(

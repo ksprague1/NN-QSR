@@ -11,11 +11,11 @@ def build_model(args):
     Ex: A Patched Transformer with 2x2 patches, system total size of 8x8, a batch size of K*Q=1024 and 16 loops when calculating
         the off diagonal probabilities to save on memory:
     
-    >>> python ModelBuilder.py --train L=64 NLOOPS=16 K=1024 sub_directory=2x2 --ptf _2D=True patch=2
+    >>> python ModelBuilder.py --train L=64 NLOOPS=16 K=1024 sub_directory=2x2 --ptf patch=2x2
     
     Ex2: A Large Patched Transformer using an RNN subsampler with 3x3 patches on the LPTF and 1D patches of size 3 on the RNN
     
-    >>> python ModelBuilder.py --rydberg --train L=576 NLOOPS=64 sub_directory=3x3 --lptf _2D=True patch=3 --rnn L=9 _2D=False patch=3 Nh=128
+    >>> python ModelBuilder.py --rydberg --train L=576 NLOOPS=64 sub_directory=3x3 --lptf patch=3x3 --rnn L=9 _2D=False patch=3 Nh=128
     
     """
     
@@ -93,23 +93,23 @@ def helper(args):
     
     help(build_model)
     
-    example = "Runtime Example:\n>>>python ModelBuilder.py --rydberg --train L=64"
+    example = "Runtime Example:\n>>>python ModelBuilder.py --rydberg --train L=144"
     while True:
         if "--lptf" in args:
             print(LPTF.INFO)
-            print(example+" --lptf _2D=True patch=3 --rnn L=9 _2D=False patch=3 Nh=128")
+            print(example+" --lptf patch=3x3 --rnn L=9 patch=3 Nh=128")
             break
         if "--rnn" in args:
             print(PRNN.INFO)
-            print(example+" --rnn _2D=False patch=4")
+            print(example+" NLOOPS=36 --rnn patch=4")
             break
         if "--ptf" in args:
             print(PTF.INFO)
-            print(example+" --ptf _2D=True patch=2")
+            print(example+" NLOOPS=24 --ptf patch=2x3")
             break
         if "--train" in args:
             print(TrainOpt.__doc__)
-            print(example+" NLOOPS=16 sgrad=False steps=4000 --ptf _2D=True patch=2")
+            print(example+" NLOOPS=36 sgrad=False steps=4000 --ptf patch=2x2")
             break
             
         args=["--"+input("What Model do you need help with?\nOptions are rnn, lptf, ptf, and training:\n".lower())]

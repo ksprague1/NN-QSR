@@ -273,11 +273,10 @@ class PTF(Sampler):
     
         Nh         (int)     -- Transformer token size. Input patches are projected to match the token size.
     
-        patch      (int)     -- Number of atoms input/predicted at once (patch size).
-                                The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-        
+        patch      (str)     -- Number of atoms input/predicted at once (patch size).
+                                The Input sequence will have an effective length of L/prod(patch)
+                                Example values: 2x2, 2x3, 2, 4
+            
         dropout    (float)   -- The amount of dropout to use in the transformer layers
         
         num_layers (int)     -- The number of transformer layers to use
@@ -287,33 +286,38 @@ class PTF(Sampler):
         repeat_pre (bool)    -- repeat the precondition instead of projecting it out
     """
     
-    DEFAULTS=Options(L=16,patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8,repeat_pre=False)
-    def __init__(self,L,patch,_2D,Nh,dropout,num_layers,nhead,repeat_pre,device=device, **kwargs):
+    DEFAULTS=Options(L=16,patch=1,Nh=128,dropout=0.0,num_layers=2,nhead=8,repeat_pre=False)
+    def __init__(self,L,patch,Nh,dropout,num_layers,nhead,repeat_pre,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
-        p=patch
+        
+
+        
+        if type(patch)==str and len(patch.split("x"))==2:
+            #patch and system sizes
+            px,py = [int(a) for a in patch.split("x")]
+            Lx,Ly=[int(L**0.5)]*2 if type(L) is int else [int(a) for a in L.split("x")]
+            #token size and positional encoder
+            t_size = Nh if type(Nh) is int else Nh[0]
+            self.pe = PE2D(t_size, Lx//px,Ly//py,device)
+            #patching, sequence length and total patch size
+            self.patch=Patch2D(px,py,Lx,Ly)
+            self.L = int(L//(px*py))
+            self.p=px*py
+        else:
+            p=int(patch)
+            self.pe = PE1D(Nh[0],L//p,device)
+            self.patch=Patch1D(p,L)
+            self.L = int(L//p)
+            self.p = p
+            
         if type(Nh) is int:
             Nh = [Nh]*4
             #self.addK=self.addQ=self.addV=nn.Identity()
         else:
-            Nh+=[int(L//p**2)*Nh[0]] if _2D else [int(L//p)*Nh[0]]
+            Nh+=[self.L*Nh[0]] if _2D else [self.L*Nh[0]]
             print(Nh)
-            #UNUSED IDEA
-            #self.addK=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
-            #self.addQ=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
-            #self.addV=nn.Sequential(nn.Linear(Nh[0],Nh[0]),nn.Sigmoid())
-        
-        if _2D:
-            L=int(L**0.5)
-            self.pe = PE2D(Nh[0], L//p,L//p,device)
-            self.patch=Patch2D(p,L)
-            self.L = int(L**2//p**2)
-            self.p=int(p**2)
-        else:
-            self.pe = PE1D(Nh[0],L//p,device)
-            self.patch=Patch1D(p,L)
-            self.L = int(L//p)
-            self.p = int(p)
+            
             
         self.device=device
         
@@ -353,13 +357,7 @@ class PTF(Sampler):
         
         self.to(device)
     
-    #UNUSED function
-    #def mix_tokens(self,token,hidden):
-    #    qgate = self.addQ(token)
-    #    kgate = self.addK(hidden)
-    #    vgate = self.addV(hidden)
-    #    
-    #    return token*qgate+hidden*(1-qgate),token*kgate+hidden*(1-kgate),token*vgate+hidden*(1-vgate)
+
     
     def set_mask(self, L):
         # type: (int)
