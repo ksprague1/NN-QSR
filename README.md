@@ -153,6 +153,29 @@ These are your LPTF parameters:
 
 ```
 
+## Hamiltonian
+
+At the moment you have a choice between using a Rydberg (--rydberg) or TFIM (--tfim) Hamiltonian.
+
+
+### Rydberg
+
+```
+Lx                            			4
+Ly                            			4
+V                             			7.0
+Omega                         			1.0
+delta                         			1.0
+
+```
+### TFIM
+```
+L                             			16
+h_x                           			-1.0
+J                             			1.0
+
+```
+
 ## Model Loader
 
 This script primarily contains the function load_model(filename) which can load in any trained model using the settings.json file

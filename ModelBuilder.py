@@ -15,7 +15,7 @@ def build_model(args):
     
     Ex2: A Large Patched Transformer using an RNN subsampler with 3x3 patches on the LPTF and 1D patches of size 3 on the RNN
     
-    >>> python ModelBuilder.py --rydberg --train L=576 NLOOPS=64 sub_directory=3x3 --lptf patch=3x3 --rnn L=9 _2D=False patch=3 Nh=128
+    >>> python ModelBuilder.py --rydberg --train L=576 NLOOPS=64 sub_directory=3x3 --lptf patch=3x3 --rnn L=9 patch=3 Nh=128
     
     """
 
