@@ -8,7 +8,7 @@ INFO="""Loads a model and resumes training with new training options (i.e a larg
     
     Ex: Running inference on an RNN:
     
-    >>> python FineTune.py DEMO\\RNN --train L=256 NLOOPS=64 K=512 steps=4000 --rydberg Lx=16 Ly=16
+    >>> python FineTune.py DEMO\\RNN --train L=256 NLOOPS=64 B=512 K=512 steps=4000 --rydberg Lx=16 Ly=16
     
 """
 

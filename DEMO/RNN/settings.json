@@ -6,7 +6,7 @@
         "B": 512,
         "NLOOPS": 16,
         "steps": 12000,
-        "dir": "RNN",
+        "dir": "DEMO",
         "lr": 0.0005,
         "sgrad": false,
         "true_grad": false,
@@ -14,8 +14,7 @@
     },
     "model": {
         "L": 64,
-        "patch": 4,
-        "_2D": false,
+        "patch": "2x2",
         "rnntype": "GRU",
         "Nh": 256,
         "model_name": "PRNN"

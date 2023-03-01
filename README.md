@@ -16,7 +16,7 @@ conda activate qsr
 This script is used to train new models from scratch. This is an example of a command
 to train an 8x8 Rydberg lattice with a patched transformer:
 ```
-python ModelBuilder.py --train L=64 NLOOPS=16 K=1024 sub_directory=2x2 --ptf _2D=True patch=2
+python ModelBuilder.py --train L=64 NLOOPS=16 K=1024 sub_directory=2x2 --ptf patch=2x2
 ```
 Training parameters are shown when running:
 
@@ -75,11 +75,10 @@ These are the RNN parameters:
     
         Nh         (int)     -- RNN hidden size
     
-        patch      (int)     -- Number of atoms input/predicted at once (patch size).
-                                The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-    
+        patch      (str)     -- Number of atoms input/predicted at once (patch size).
+                                The Input sequence will have an effective length of L/prod(patch)
+                                Example values: 2x2, 2x3, 2, 4
+        
         rnntype    (string)  -- Which type of RNN cell to use. Only ELMAN and GRU are valid options at the moment
     
 
@@ -103,11 +102,10 @@ These are your PTF parameters:
     
         Nh         (int)     -- Transformer token size. Input patches are projected to match the token size.
     
-        patch      (int)     -- Number of atoms input/predicted at once (patch size).
-                                The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-        
+        patch      (str)     -- Number of atoms input/predicted at once (patch size).
+                                The Input sequence will have an effective length of L/prod(patch)
+                                Example values: 2x2, 2x3, 2, 4
+            
         dropout    (float)   -- The amount of dropout to use in the transformer layers
         
         num_layers (int)     -- The number of transformer layers to use
@@ -141,9 +139,7 @@ These are your LPTF parameters:
     
         patch      (int)     -- Number of atoms input/predicted at once (patch size).
                                 The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-        
+            
         dropout    (float)   -- The amount of dropout to use in the transformer layers
         
         num_layers (int)     -- The number of transformer layers to use
@@ -199,7 +195,7 @@ Loads a model and resumes training with new training options (i.e a larger syste
     
     Ex: Running inference on an RNN:
     
-    >>> python FineTune.py DEMO\RNN --train L=256 NLOOPS=64 K=512 steps=4000 --rydberg Lx=16 Ly=16
+    >>> python FineTune.py DEMO\RNN --train L=256 NLOOPS=64 B=512 K=512 steps=4000 --rydberg Lx=16 Ly=16
     
 
 ```
@@ -223,7 +219,7 @@ Trains a new network by running inference on a trained network and minimizing KL
     
     Ex: A Patched Transformer with 2x2 patches, system total size of 8x8 learning off of a trained RNN:
     
-    >>> python Transfer.py DEMO\RNN --train steps=1000 L=64 K=1024 --ptf _2D=True patch=2
+    >>> python Transfer.py DEMO\RNN --train steps=1000 L=64 K=1024 --ptf patch=2x2
     
 
 ```

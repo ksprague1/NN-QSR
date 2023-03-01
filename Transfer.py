@@ -10,7 +10,7 @@ INFO="""Trains a new network by running inference on a trained network and minim
     
     Ex: A Patched Transformer with 2x2 patches, system total size of 8x8 learning off of a trained RNN:
     
-    >>> python Transfer.py DEMO\\RNN --train steps=1000 L=64 K=1024 --ptf _2D=True patch=2
+    >>> python Transfer.py DEMO\\RNN --train steps=1000 L=64 K=1024 --ptf patch=2x2
     
 """
 
