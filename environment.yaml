@@ -1,4 +1,4 @@
-name: qsr
+
 channels:
   - pytorch
   - nvidia

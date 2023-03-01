@@ -28,7 +28,7 @@ def build_model(args):
         split1=args.index("--rnn")
         
         SMODEL=PRNN
-        train_opt=TrainOpt(K=512,Q=1,dir="RNN")
+        train_opt=TrainOpt(K=256,Q=1,dir="RNN")
     if "--ptf" in args:
         split1=args.index("--ptf")
         SMODEL=PTF

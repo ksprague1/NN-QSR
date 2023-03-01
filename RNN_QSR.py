@@ -185,6 +185,28 @@ class Hamiltonian():
         eloc += self.offDiag *sumsqrtp* torch.exp(logsqrtp-logp/2)
 
         return eloc
+    
+    def magnetizations(self, samples):
+        B = samples.shape[0]
+        L = samples.shape[1]
+        mag = torch.zeros(B, device=self.device)
+        abs_mag = torch.zeros(B, device=self.device)
+        sq_mag = torch.zeros(B, device=self.device)
+        stag_mag = torch.zeros(B, device=self.device)
+
+        with torch.no_grad():
+            samples_pm = 2 * samples - 1
+            mag += torch.sum(samples_pm.squeeze(2), axis=1)
+            abs_mag += torch.abs(torch.sum(samples_pm.squeeze(2), axis=1))
+            sq_mag += torch.abs(torch.sum(samples_pm.squeeze(2), axis=1))**2
+            
+            samples_reshape = torch.reshape(samples.squeeze(2), (B, int(np.sqrt(L)), int(np.sqrt(L))))
+            for i in range(int(np.sqrt(L))):
+                for j in range(int(np.sqrt(L))):
+                    stag_mag += (-1)**(i+j) * (samples_reshape[:,i,j] - 0.5)
+
+        return mag, abs_mag, sq_mag, stag_mag / L
+
     def ground(self):
         """Returns the ground state energy E/L"""
         raise NotImplementedError
@@ -765,7 +787,7 @@ class TrainOpt(Options):
         hamiltonian (str)    -- which hamiltonian to use
     """
     def get_defaults(self):
-        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=12000,dir="out",lr=5e-4,kl=0.0,sgrad=False)
+        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=50000,dir="out",lr=5e-4,kl=0.0,sgrad=False)
 
 import sys
 def reg_train(op,to=None,printf=False,mydir=None):
@@ -834,6 +856,12 @@ def reg_train(op,to=None,printf=False,mydir=None):
             E=h.localenergyALT(samplequeue,logp,sump_queue,sqrtp_queue)
             #energy mean and variance
             Ev,Eo=torch.var_mean(E)
+	    
+            MAG, ABS_MAG, SQ_MAG, STAG_MAG  = h.magnetizations(samplequeue)
+            mag_v, mag = torch.var_mean(MAG)
+            abs_mag_v, abs_mag = torch.var_mean(ABS_MAG)
+            sq_mag_v, sq_mag = torch.var_mean(SQ_MAG)
+            stag_mag_v, stag_mag = torch.var_mean(STAG_MAG)
 
         ERR  = Eo/(op.L)
         
@@ -851,7 +879,8 @@ def reg_train(op,to=None,printf=False,mydir=None):
         optimizer.step()
 
         # many repeat values but it keeps the same format as no queue
-        debug+=[[Ev.item()**0.5,Eo.item(),Ev.item()**0.5,Eo.item(),loss.item(),Eo.item(),0,time.time()-t]]
+        #debug+=[[Ev.item()**0.5,Eo.item(),Ev.item()**0.5,Eo.item(),loss.item(),Eo.item(),0,time.time()-t]]
+        debug += [[Eo.item(), Ev.item(), mag.item(), mag_v.item(), abs_mag.item(), abs_mag_v.item(), sq_mag.item(), sq_mag_v.item(), stag_mag.item(), stag_mag_v.item(), time.time()-t]]
 
         if x%500==0:
             print(int(time.time()-t),end=",%.3f|"%(losses[-1]))
