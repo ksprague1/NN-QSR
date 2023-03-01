@@ -817,6 +817,8 @@ class TrainOpt(Options):
         dir        (str)     -- Output directory, set to <NONE> for no output
         
         lr         (float)   -- Learning rate
+        
+        seed       (int)     -- Random seed for the run
                 
         sgrad      (bool)    -- whether or not to sample with gradients. 
                                 (Uses less ram when but slightly slower)
