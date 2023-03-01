@@ -4,10 +4,10 @@ from PTF import *
 class LPTF(Sampler):
     
     """
-    Sampler class which uses a transformer for long term information and a smaller Sampler for short term information
+    Sampler class which uses a transformer for long term information and a smaller subsampler for short term information
     This can either be in the form of an RNN or a transformer (likely patched).
     
-    The sequence is broken into 2D patches (4x4 by default), each patch is expanded to a tensor of size Nh (be repeating it),\
+    The sequence is broken into 2D patches, each patch is expanded to a tensor of size Nh (be repeating it),\
     then a positional encoding is added. You then apply masked self-attention to the patches num_layers times, with the final
     outputs fed in as the initial hidden state of an rnn.
     
@@ -28,9 +28,7 @@ class LPTF(Sampler):
     together (or adding them in logscale).
     
     """
-    INFO = """
-    
-    Transformer based sampler where the input sequence is broken up into large 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is projected into a token with an added positional encoding. The sequence of encoded patches is used as transformer input. This specific model is used for very large patches where doing a softmax over all possible patches is not feasable thus a subsampler must be used to factorize these probabilities.
+    INFO = """Transformer based sampler where the input sequence is broken up into large 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is projected into a token with an added positional encoding. The sequence of encoded patches is used as transformer input. This specific model is used for very large patches where doing a softmax over all possible patches is not feasable thus a subsampler must be used to factorize these probabilities.
     
     
     LPTF Optional arguments:
@@ -42,36 +40,37 @@ class LPTF(Sampler):
     
         patch      (int)     -- Number of atoms input/predicted at once (patch size).
                                 The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-        
+            
         dropout    (float)   -- The amount of dropout to use in the transformer layers
         
         num_layers (int)     -- The number of transformer layers to use
         
-        nheads     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
+        nhead     (int)     -- The number of heads to use in Multi-headed Self-Attention. This should divide Nh
         
         subsampler (Sampler) -- The inner model to use for probability factorization. This is set implicitly
                                 by including --rnn or --ptf arguments.
     
     """
-    DEFAULTS=Options(patch=1,_2D=False,Nh=128,dropout=0.0,num_layers=2,nhead=8)
-    def __init__(self,subsampler,L,patch,_2D,Nh,dropout,num_layers,nhead,device=device, **kwargs):
+    DEFAULTS=Options(L=64,patch=1,Nh=128,dropout=0.0,num_layers=2,nhead=8,full_seq=False)
+    def __init__(self,subsampler,L,patch,Nh,dropout,num_layers,nhead,full_seq,device=device, **kwargs):
         super(Sampler, self).__init__()
         #print(nhead)
-        p=patch
-        
-        if _2D:
-            L=int(L**0.5)
-            self.pe = PE2D(Nh, L//p,L//p,device)
-            self.patch=Patch2D(p,L)
-            self.L = int(L**2//p**2)
-            self.p=int(p**2)
+        if type(patch)==str and len(patch.split("x"))==2:
+            #patch and system sizes
+            px,py = [int(a) for a in patch.split("x")]
+            Lx,Ly=[int(L**0.5)]*2 if type(L) is int else [int(a) for a in L.split("x")]
+            #token size and positional encoder
+            self.pe = PE2D(Nh, Lx//px,Ly//py,device)
+            #patching, sequence length and total patch size
+            self.patch=Patch2D(px,py,Lx,Ly)
+            self.L = int(L//(px*py))
+            self.p=px*py
         else:
-            self.pe = PE1D(Nh,L//p,device)
+            p=int(patch)
+            self.pe = PE1D(Nh[0],L//p,device)
             self.patch=Patch1D(p,L)
             self.L = int(L//p)
-            self.p = int(p)
+            self.p = p
             
 
         self.tokenize=nn.Sequential(
@@ -79,12 +78,13 @@ class LPTF(Sampler):
                 nn.Tanh()
         )
             
+        self.allh=full_seq
             
         self.device=device
         #Encoder only transformer
-        #misinterperetation on encoder made it so this code does not work
         self.transformer = FastMaskedTransformerEncoder(Nh=Nh,dropout=dropout,num_layers=num_layers,nhead=nhead)       
         
+        # Sampler class object which has both sample and logprobability functions
         self.subsampler = subsampler#subsample(**rnnargs)
         
         self.set_mask(self.L)
@@ -115,6 +115,7 @@ class LPTF(Sampler):
         input = self.patch(input.squeeze(-1)).transpose(1,0)
         
         data=torch.zeros(input.shape,device=self.device)
+        #The first input should be zeros and the last patch is not used as input
         data[1:]=input[:-1]
         
         #[L//p,B,p] -> [L//p,B,Nh]
@@ -123,11 +124,14 @@ class LPTF(Sampler):
         output = self.transformer(encoded)
         
         Lp,B,Nh=output.shape
-        # [L//p,B,Nh] -> [1,L//p*B,Nh]
-        h0 = output.view([1,Lp*B,Nh])
-        rnn_input = input.reshape([Lp*B,self.p])
+        if self.allh:
+            h0 = output
+        else:
+            # [L//p,B,Nh] -> [1,L//p*B,Nh]
+            h0 = output.view([1,Lp*B,Nh])
+        flattened_input = input.reshape([Lp*B,self.p])
         # [L//p*B,p],[1,L//p*B,Nh] -> [L//p,B]
-        logsubsample = self.subsampler.logprobability(rnn_input,h0).view([Lp,B])
+        logsubsample = self.subsampler.logprobability(flattened_input,h0).view([Lp,B])
         
         #[L//p,B] -> [B]
         logp=torch.sum(logsubsample,dim=0)
@@ -143,35 +147,35 @@ class LPTF(Sampler):
         Returns:
             samples - [B,L,1] matrix of zeros and ones for ground/excited states
         """
-        #length is divided by four due to patching
+        #sequence length is divided by patch size due to patching
         L=L//self.p
         
-        #return (torch.rand([B,L,1],device=device)<0.5).to(torch.float32)
         #Sample set will have shape [L/p,B,p]
-        #need one extra zero batch at the start for first pred hence input is [L+1,B,1] 
+        #need one extra zero batch at the start for first pred hence input is [L/p+1,B,1] 
         input = torch.zeros([L+1,B,self.p],device=self.device)
 
         logp = torch.zeros([B],device=self.device)
         
-        #with torch.no_grad():
         for idx in range(1,L+1):
             
-            #pe should be sequence first [l,B,Nh]
-            # multiply by 1 to copy the tensor
+            #[l,B,p] -> [l,B,Nh]            multiply by 1 to copy the tensor
             encoded_input = self.pe(self.tokenize(input[:idx,:,:]*1))
                         
-            #Get transformer output
+            #Get transformer output (shape [l,B,Nh])
             output,cache = self.transformer.next_with_cache(encoded_input,cache)
-            #get state and probability by sampling from the subsample
-            sample,logsubsample = self.subsampler.sample(B,self.p,output[-1].view([1,B,output.shape[-1]]))
-            
+            #get state and probability by sampling from the subsample (pass along the last elem reshaped to [1,B,Nh])
+            if self.allh:
+                sample,logsubsample = self.subsampler.sample(B,self.p,output)
+            else:
+                sample,logsubsample = self.subsampler.sample(B,self.p,output[-1].view([1,B,output.shape[-1]]))
+            #Add your logscale conditional probability to the sum
             logp+=logsubsample
             #set input to the sample that was actually chosen
             input[idx] = sample.squeeze(-1)
             
         #remove the leading zero in the input    
         input=input[1:]
-        #sample is repeated 16 times at 3rd index so we just take the first one
+        #Unpatch the samples
         return self.patch.reverse(input.transpose(1,0)).unsqueeze(-1),logp
     
     
@@ -208,75 +212,81 @@ class LPTF(Sampler):
         #switch sample into sequence-first
         sample = sample.transpose(1,0)
             
-        #compute all of their logscale probabilities
-        with torch.no_grad():
+        #compute all of the logscale probabilities of the original sample
+        data=torch.zeros(sample.shape,device=self.device)
+        data[1:]=sample[:-1]
 
-            data=torch.zeros(sample.shape,device=self.device)
-            data[1:]=sample[:-1]
-            
-            #[L//p,B,p] -> [L//p,B,Nh]
-            encoded=self.pe(self.tokenize(data))
-            
-            #add positional encoding and make the cache
-            out,cache=self.transformer.make_cache(encoded)
-            probs=torch.zeros([B,L],device=self.device)
-            #expand cache to group L//D flipped states
-            cache=cache.unsqueeze(2)
+        #[L//p,B,p] -> [L//p,B,Nh]
+        encoded=self.pe(self.tokenize(data))
 
-            #this line took like 1 hour to write I'm so sad
-            #the cache has to be shaped such that the batch parts line up
-                        
-            cache=cache.repeat(1,1,L//D,1,1).transpose(2,3).reshape(cache.shape[0],L//self.p,B*L//D,cache.shape[-1])
-            
-            Lp,B,Nh=out.shape
+        #add positional encoding and make the cache
+        out,cache=self.transformer.make_cache(encoded)
+        probs=torch.zeros([B,L],device=self.device)
+        #expand cache to group L//D flipped states
+        cache=cache.unsqueeze(2)
+        
+        #the cache has to be repeated L//D times along the correct axis (otherwise there is a mismatch)
+        cache=cache.repeat(1,1,L//D,1,1).transpose(2,3).reshape(cache.shape[0],L//self.p,B*L//D,cache.shape[-1])
+
+        Lp,B,Nh=out.shape
+        
+        if self.allh:
+            h0 = out
+        else:
             # [L//p,B,Nh] -> [1,L//p*B,Nh]
             h0 = out.view([1,Lp*B,Nh])
-            rnn_input = sample.reshape([Lp*B,self.p])
-            # [L//p*B,p],[1,L//p*B,Nh] -> [L//p,B]
-            logsubsample0 = self.subsampler.logprobability(rnn_input,h0).view([Lp,B])
+        #flatten the batch & sequence dimensions into the batch dimension
+        flattened_input = sample.reshape([Lp*B,self.p])
+        # [L//p*B,p],[1,L//p*B,Nh] -> [L//p,B]
+        logsubsample0 = self.subsampler.logprobability(flattened_input,h0).view([Lp,B])
 
-            for k in range(D):
+        for k in range(D):
 
-                N = k*L//D
-                #next couple of steps are crucial          
-                #get the samples from N to N+L//D
-                #Note: samples are the same as the original up to the Nth spin
-                real = sflip[:,N:(k+1)*L//D]
-                #flatten it out and set to sequence first
-                tmp = real.reshape([B*L//D,L//self.p,self.p]).transpose(1,0)
-                #set up next state predction
-                fsample=torch.zeros(tmp.shape,device=self.device)
-                fsample[1:]=tmp[:-1]
-                # put sequence before batch so you can use it with your transformer
-                tgt=self.pe(self.tokenize(fsample))
-                #grab your transformer output
-                out,_=self.transformer.next_with_cache(tgt,cache[:,:N//self.p],N//self.p)
+            N = k*L//D
+            #next couple of steps are crucial          
+            #get the samples from N to N+L//D
+            #Note: samples are the same as the original up to the Nth spin
+            real = sflip[:,N:(k+1)*L//D]
+            #flatten it out and set to sequence first
+            tmp = real.reshape([B*L//D,L//self.p,self.p]).transpose(1,0)
+            #set up next state predction
+            fsample=torch.zeros(tmp.shape,device=self.device)
+            fsample[1:]=tmp[:-1]
+            # add positional encoding
+            tgt=self.pe(self.tokenize(fsample))
+            #grab your transformer output
+            out,_=self.transformer.next_with_cache(tgt,cache[:,:N//self.p],N//self.p)
 
-                output = out[N//self.p:]
-                
-                #[(L-N)/p,B*L/D,Nh]
-                Lp2,B2,Nh=output.shape
-                
+            output = out[N//self.p:]
+
+            #[(L-N)/p,B*L/D,Nh]
+            Lp2,B2,Nh=output.shape
+
+            if self.allh:
+                h0 = out
+            else:
                 # [(L-N)/p,B*L/D,Nh] -> [1,((L-N)/p)*(B*L/D),Nh]
                 h0 = output.view([1,Lp2*B2,Nh])
-                
-                rnn_input = tmp[N//self.p:].reshape([Lp2*B2,self.p])
-                # [?] -> [(L-N)/p,B*L//D]
-                logsubsample = self.subsampler.logprobability(rnn_input,h0).view([Lp2,B2])
+            #flatten the batch & sequence dimensions into the batch dimension
+            flattened_input = tmp[N//self.p:].reshape([Lp2*B2,self.p])
+            
+            #get the subsampler output and unflatten it
+            # [?] -> [(L-N)/p,B*L//D]
+            logsubsample = self.subsampler.logprobability(flattened_input,h0).view([Lp2,B2])
 
-                #[(L-N)/p,B*L//D] -> [B,L/D]
-                                
-                #sum over (L-N)/p
-                logp=torch.sum(logsubsample,dim=0).view([B,L//D])
-                
-                #sum over N/p
-                logp+=torch.sum(logsubsample0[:N//self.p],dim=0).unsqueeze(-1)
-                
-                probs[:,N:(k+1)*L//D]=logp
+            #[(L-N)/p,B*L//D] -> [B,L/D]
+
+            #sum over (L-N)/p
+            logp=torch.sum(logsubsample,dim=0).view([B,L//D])
+
+            #sum over N/p
+            logp+=torch.sum(logsubsample0[:N//self.p],dim=0).unsqueeze(-1)
+
+            probs[:,N:(k+1)*L//D]=logp
                 
         return probs
     
-    
+OptionManager.register("lptf",LPTF.DEFAULTS) 
 
 if __name__=="__main__":        
     import sys

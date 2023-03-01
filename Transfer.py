@@ -2,6 +2,17 @@ from ModelBuilder import *
 from ModelLoader import *
 
 
+INFO="""Trains a new network by running inference on a trained network and minimizing KL divergence
+    
+    A cmd call should look like this
+    
+    >>> python Transfer.py <Model Directory> --<param1> <name11>=<value11> <name12>=<value12> --<param2> <name21>=<value21> . . .
+    
+    Ex: A Patched Transformer with 2x2 patches, system total size of 8x8 learning off of a trained RNN:
+    
+    >>> python Transfer.py DEMO\\RNN --train steps=1000 L=64 K=1024 --ptf patch=2x2
+    
+"""
 
 
 def transfer(teacher,student,optim,op,printf=False,mydir=None):
@@ -10,6 +21,8 @@ def transfer(teacher,student,optim,op,printf=False,mydir=None):
         #Set up save location
         if mydir==None:
             mydir = setup_dir(op)
+            
+        op=op["TRAIN"]
         t=time.time()
         for x in range(op.steps):
 
@@ -61,9 +74,12 @@ def transfer(teacher,student,optim,op,printf=False,mydir=None):
     
 
 if __name__=="__main__":        
-    import sys
+  import sys
+
+  if "--help" in sys.argv:
+    print(INFO)
+  else:    
     print(sys.argv[1:])
-        
     #load teacher model
     filename = sys.argv[1]
     teacher,t_opt = load_model(filename)
@@ -71,12 +87,16 @@ if __name__=="__main__":
     #load student model and optimizer
     student,s_opt,train_opt = build_model(sys.argv[2:])
     
-    train_opt.dir="TRANSFER"
+    train_opt["HAMILTONIAN"] = Options(**t_opt.hamiltonian)
+    
+    s_opt.hamiltonian = t_opt.hamiltonian
+    
+    train_opt["TRAIN"].dir="TRANSFER"
     
     beta1=0.9;beta2=0.999
     optimizer = torch.optim.Adam(
     student.parameters(), 
-    lr=train_opt.lr, 
+    lr=train_opt["TRAIN"].lr, 
     betas=(beta1,beta2)
     )
     
@@ -87,9 +107,11 @@ if __name__=="__main__":
     mydir=setup_dir(train_opt)
     
     #add extra info to settings
-    train_opt.source_model=sys.argv[1]
-    s_opt.train=train_opt.__dict__
+    train_opt["TRAIN"].source_model=sys.argv[1]
+    s_opt.train=train_opt["TRAIN"].__dict__
     
+    print(s_opt)
+    print(t_opt)
     
     orig_stdout = sys.stdout
     

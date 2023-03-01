@@ -47,7 +47,7 @@ class Options:
             out+=line+" "
         return out[:-1]
     
-    def apply(self,args):
+    def apply(self,args,warn=True):
         """Takes in a tuple of command line arguments and turns them into options
         Inputs:
             args (tuple<str>) - Your command line arguments
@@ -58,6 +58,8 @@ class Options:
             try:
                 key,val=arg.split("=")
                 kwargs[key]=self.cmd_cast(val)
+                if warn and (not key in self.__dict__):
+                    print("Unknown Argument: %s"%key)
             except:pass
         self.__dict__.update(kwargs)
     def cmd_cast(self,x0):
@@ -112,6 +114,35 @@ class Options:
     def copy(self):
         return Options(**self.__dict__)
 
+
+class OptionManager():
+    
+    registry = dict()
+    @staticmethod
+    def register(name: str , opt: Options):
+        OptionManager.registry[name.upper()] = opt
+    
+    @staticmethod
+    def parse_cmd(args: list) -> dict:
+        output=dict()
+        sub_args=[]
+        for arg in args[::-1]:
+            # --name Signifies a new set of options
+            if arg[:2] == "--":
+                arg=arg.upper()
+                #make sure the name is registered
+                if not arg[2:] in OptionManager.registry:
+                    raise Exception("Argument %s Not Registered"%arg)
+                #copy the defaults and apply the new options
+                opt = OptionManager.registry[arg[2:]].copy()
+                opt.apply(sub_args)
+                output[arg[2:]] = opt
+                # Reset the collection of arguments
+                sub_args=[]
+            #otherwise keep adding options
+            else:
+                sub_args+=[arg]
+        return output
 # In[2]:
 
 
@@ -214,9 +245,11 @@ class Hamiltonian():
 
 
 class Rydberg(Hamiltonian):
-    E={16:-0.4534,36:-0.4221,64:-0.40522,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687,2304:-0.3645}
-    Err = {16: 0.0001,36: 0.0005,64: 0.0002, 144: 0.0002, 256: 0.0002, 576: 0.0006,1024: 0.0007,2304: 0.0007}
-    def __init__(self,Lx,Ly,V=7.0,Omega=1.0,delta=1.0,device=device):
+    E={16:-0.4534,36:-0.4221,64:-0.4058,144:-0.38852,256:-0.38052,576:-0.3724,1024:-0.3687,2304:-0.3645}
+    Err = {16: 0.0001,36: 0.0005,64: 0.0005, 144: 0.0002, 256: 0.0002, 576: 0.0006,1024: 0.0007,2304: 0.0007}
+    
+    DEFAULTS = Options(Lx=4,Ly=4,V=7.0,Omega=1.0,delta=1.0)
+    def __init__(self,Lx,Ly,V,Omega,delta,device=device,**kwargs):
         self.Lx       = Lx              # Size along x
         self.Ly       = Ly              # Size along y
         self.V        = V               # Van der Waals potential
@@ -252,13 +285,15 @@ class Rydberg(Hamiltonian):
     def ground(self):
         return Rydberg.E[self.Lx*self.Ly]
 
-
+OptionManager.register("rydberg",Rydberg.DEFAULTS)
 # In[5]:
 
 
 class TFIM(Hamiltonian):
     """Implementation of the Transverse field Ising model with Periodic Boundary Conditions"""
-    def __init__(self,L,h_x,J=1.0,device=device):
+    
+    DEFAULTS=Options(L=16,h_x=-1.0,J=1.0)
+    def __init__(self,L,h_x,J,device=device,**kwargs):
         self.J = J
         self.h=h_x
         super(TFIM,self).__init__(L,h_x,device)
@@ -285,7 +320,7 @@ class TFIM(Hamiltonian):
         E0 = -1/N*np.sum(np.sqrt(1+h**2-2*h*np.cos(Pn)))
         return E0*self.J
 
-
+OptionManager.register("tfim",TFIM.DEFAULTS)
 # In[6]:
 
 
@@ -361,19 +396,26 @@ class Sampler(nn.Module):
         sumsqrtp = torch.exp(probs/2-logsqrtp.unsqueeze(1)).sum(dim=1)
         return sumsqrtp,logsqrtp
     
-    
-
 
 
 # In[8]: Functions for making Patches & doing probability traces
 class Patch2D(nn.Module):
-    def __init__(self,n,Lx):
+    def __init__(self,nx,ny,Lx,Ly,device=device):
         super().__init__()
-        self.n=n
+        self.nx=nx
+        self.ny=ny
+        self.Ly=Ly
         self.Lx=Lx
+        
+        #construct an index tensor for the reverse operation
+        indices = torch.arange(Lx*Ly,device=device).unsqueeze(0)
+        self.mixed = self.forward(indices).reshape([Lx*Ly])
+        #inverse
+        self.mixed=torch.argsort(self.mixed)
+        
     def forward(self,x):
         # type: (Tensor) -> Tensor
-        n,Lx=self.n,self.Lx
+        nx,ny,Lx,Ly=self.nx,self.ny,self.Lx,self.Ly
         """Unflatten a tensor back to 2D, break it into nxn chunks, then flatten the sequence and the chunks
             Input:
                 Tensor of shape [B,L]
@@ -382,7 +424,7 @@ class Patch2D(nn.Module):
         """
         #make the input 2D then break it into 2x2 chunks 
         #afterwards reshape the 2x2 chunks to vectors of size 4 and flatten the 2d bit
-        return x.view([x.shape[0],Lx,Lx]).unfold(-2,n,n).unfold(-2,n,n).reshape([x.shape[0],int(Lx*Lx//n**2),int(n**2)])
+        return x.view([x.shape[0],Lx,Ly]).unfold(-2,nx,nx).unfold(-2,ny,ny).reshape([x.shape[0],int(Lx*Ly//(nx*ny)),nx*ny])
 
     def reverse(self,x):
         # type: (Tensor) -> Tensor
@@ -392,11 +434,11 @@ class Patch2D(nn.Module):
             Output:
                 Tensor of shape [B,L]
         """
-        n,Lx=self.n,self.Lx
-        # original sequence order can be retrieved by chunking twice more
-        #in the x-direction you should have chunks of size 2, but in y it should
-        #be chunks of size Ly//2
-        return x.unfold(-2,Lx//n,Lx//n).unfold(-2,n,n).reshape([x.shape[0],Lx*Lx])
+        Ly,Lx=self.Ly,self.Lx
+        # Reversing is done with an index tensor because torch doesn't have an inverse method for unfold
+        return x.reshape([x.shape[0],Ly*Lx])[:,self.mixed]
+    
+    
     
 class Patch1D(nn.Module):
     def __init__(self,n,L):
@@ -461,9 +503,7 @@ class PRNN(Sampler):
     
     """
     
-    INFO = """
-    
-    RNN based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is used to update the RNN hidden state, which (after two Fully Connected layers) is used to get the probability labels.
+    INFO = """RNN based sampler where the input sequence is broken up into 'patches' and the output is a sequence of conditional probabilities of all possible patches at position i given the previous 0 to i-1 patches. Each patch is used to update the RNN hidden state, which (after two Fully Connected layers) is used to get the probability labels.
     
     RNN Optional arguments:
     
@@ -471,29 +511,29 @@ class PRNN(Sampler):
     
         Nh         (int)     -- RNN hidden size
     
-        patch      (int)     -- Number of atoms input/predicted at once (patch size).
-                                The Input sequence will have an effective length of L/patch
-    
-        _2D        (bool)    -- Whether or not to make patches 2D (Ex patch=2 and _2D=True give shape 2x2 patches)
-    
+        patch      (str)     -- Number of atoms input/predicted at once (patch size).
+                                The Input sequence will have an effective length of L/prod(patch)
+                                Example values: 2x2, 2x3, 2, 4
+        
         rnntype    (string)  -- Which type of RNN cell to use. Only ELMAN and GRU are valid options at the moment
     """
     
-    DEFAULTS=Options(patch=1,_2D=False,rnntype="GRU",Nh=256)
+    DEFAULTS=Options(L=16,patch=1,rnntype="GRU",Nh=256)
     TYPES={"GRU":nn.GRU,"ELMAN":nn.RNN,"LSTM":nn.LSTM}
-    def __init__(self,L,patch,_2D,rnntype,Nh,device=device, **kwargs):
+    def __init__(self,L,patch,rnntype,Nh,device=device, **kwargs):
         
         super(PRNN, self).__init__(device=device)
-        p=patch
-        if _2D:
+        if type(patch)==str and len(patch.split("x"))==2:
+            px,py = [int(a) for a in patch.split("x")]
             L=int(L**0.5)
-            self.patch=Patch2D(p,L)
-            self.L = int(L**2//p**2)
-            self.p=int(p**2)
+            self.patch=Patch2D(px,py,L,L)
+            self.L = int(L**2//(px*py))
+            self.p=px*py
         else:
+            p=int(patch)
             self.patch=Patch1D(p,L)
             self.L = int(L//p)
-            self.p = int(p)
+            self.p = p
         
         assert rnntype!="LSTM"
         #rnn takes input shape [B,L,1]
@@ -624,69 +664,68 @@ class PRNN(Sampler):
                 sflip[:,j*self.p+j2] = sample*1.0
                 sflip[:,j*self.p+j2,j,j2] = 1-sflip[:,j*self.p+j2,j,j2]
             
+            
         #compute all of their logscale probabilities
-        with torch.no_grad():
-            
-            data=torch.zeros(sample.shape,device=self.device)
-            
-            data[:,1:]=sample[:,:-1]
-            
-            #add positional encoding and make the cache
-            
-            h=torch.zeros([1,B,self.Nh],device=self.device)
-            
-            out,_=self.rnn(data,h)
-            
-            #cache for the rnn is the output in this sense
-            #shape [B,L//4,Nh]
-            cache=out
-            probs=torch.zeros([B,L],device=self.device)
-            #expand cache to group L//D flipped states
-            cache=cache.unsqueeze(1)
+        data=torch.zeros(sample.shape,device=self.device)
 
-            #this line took like 1 hour to write I'm so sad
-            #the cache has to be shaped such that the batch parts line up
-                        
-            cache=cache.repeat(1,L//D,1,1).reshape(B*L//D,L//self.p,cache.shape[-1])
-                        
-            pred0 = self.lin(out)
-            #shape will be [B,L//4,16]
-            real=genpatch2onehot(sample,self.p)
-            #[B,L//4,16] -> [B,L//4]
-            total0 = torch.sum(real*pred0,dim=-1)
+        data[:,1:]=sample[:,:-1]
 
-            for k in range(D):
+        #add positional encoding and make the cache
 
-                N = k*L//D
-                #next couple of steps are crucial          
-                #get the samples from N to N+L//D
-                #Note: samples are the same as the original up to the Nth spin
-                real = sflip[:,N:(k+1)*L//D]
-                #flatten it out and set to sequence first
-                tmp = real.reshape([B*L//D,L//self.p,self.p])
-                #set up next state predction
-                fsample=torch.zeros(tmp.shape,device=self.device)
-                fsample[:,1:]=tmp[:,:-1]
-                #grab your rnn output
-                if k==0:
-                    out,_=self.rnn(fsample,cache[:,0].unsqueeze(0)*0.0)
-                else:
-                    out,_=self.rnn(fsample[:,N//self.p:],cache[:,N//self.p-1].unsqueeze(0)*1.0)
-                # grab output for the new part
-                output = self.lin(out)
-                # reshape output separating batch from spin flip grouping
-                pred = output.view([B,L//D,(L-N)//self.p,1<<self.p])
-                real = genpatch2onehot(real[:,:,N//self.p:],self.p)
-                total = torch.sum(real*pred,dim=-1)
-                #sum across the sequence for probabilities
-                #print(total.shape,total0.shape)
-                logp=torch.sum(torch.log(total),dim=-1)
-                logp+=torch.sum(torch.log(total0[:,:N//self.p]),dim=-1).unsqueeze(-1)
-                probs[:,N:(k+1)*L//D]=logp
-                
+        h=torch.zeros([1,B,self.Nh],device=self.device)
+
+        out,_=self.rnn(data,h)
+
+        #cache for the rnn is the output in this sense
+        #shape [B,L//4,Nh]
+        cache=out
+        probs=torch.zeros([B,L],device=self.device)
+        #expand cache to group L//D flipped states
+        cache=cache.unsqueeze(1)
+
+        #this line took like 1 hour to write I'm so sad
+        #the cache has to be shaped such that the batch parts line up
+
+        cache=cache.repeat(1,L//D,1,1).reshape(B*L//D,L//self.p,cache.shape[-1])
+
+        pred0 = self.lin(out)
+        #shape will be [B,L//4,16]
+        real=genpatch2onehot(sample,self.p)
+        #[B,L//4,16] -> [B,L//4]
+        total0 = torch.sum(real*pred0,dim=-1)
+
+        for k in range(D):
+
+            N = k*L//D
+            #next couple of steps are crucial          
+            #get the samples from N to N+L//D
+            #Note: samples are the same as the original up to the Nth spin
+            real = sflip[:,N:(k+1)*L//D]
+            #flatten it out and set to sequence first
+            tmp = real.reshape([B*L//D,L//self.p,self.p])
+            #set up next state predction
+            fsample=torch.zeros(tmp.shape,device=self.device)
+            fsample[:,1:]=tmp[:,:-1]
+            #grab your rnn output
+            if k==0:
+                out,_=self.rnn(fsample,cache[:,0].unsqueeze(0)*0.0)
+            else:
+                out,_=self.rnn(fsample[:,N//self.p:],cache[:,N//self.p-1].unsqueeze(0)*1.0)
+            # grab output for the new part
+            output = self.lin(out)
+            # reshape output separating batch from spin flip grouping
+            pred = output.view([B,L//D,(L-N)//self.p,1<<self.p])
+            real = genpatch2onehot(real[:,:,N//self.p:],self.p)
+            total = torch.sum(real*pred,dim=-1)
+            #sum across the sequence for probabilities
+            #print(total.shape,total0.shape)
+            logp=torch.sum(torch.log(total),dim=-1)
+            logp+=torch.sum(torch.log(total0[:,:N//self.p]),dim=-1).unsqueeze(-1)
+            probs[:,N:(k+1)*L//D]=logp
+
         return probs
 
-
+OptionManager.register("rnn",PRNN.DEFAULTS)
 
 
 def new_rnn_with_optim(rnntype,op,beta1=0.9,beta2=0.999):
@@ -727,24 +766,24 @@ def mkdir(dir_):
     except:return -1
     return 0
 
-def setup_dir(op):
+def setup_dir(op_dict):
     """Makes directory for output and saves the run settings there
     Inputs: 
-        op (Opt) - Options object
+        op_dict (dict) - Dictionary of Options objects
     Outputs:
         Output directory mydir
     
     """
+    op=op_dict["TRAIN"]
+    
     if op.dir=="<NONE>":
         return
-    mydir= op.dir+"/%s/%d-B=%d-K=%d"%(op.hamiltonian,op.L,op.B,op.K)
-    if op.hamiltonian == "TFIM":
-        mydir+=("-h=%.1f"%op.h)
-    if "patch" in op.__dict__:
-        mydir+="-P=%s"%op.patch
-    mkdir(op.dir)
-    mkdir(op.dir+"/%s"%op.hamiltonian)
-    mkdir(mydir)
+    
+    hname = op_dict["HAMILTONIAN"].name if "HAMILTONIAN" in op_dict else "NA"
+    
+    mydir= op.dir+"/%s/%d-B=%d-K=%d%s"%(hname,op.L,op.B,op.K,op.sub_directory)
+
+    os.makedirs(mydir,exist_ok = True)
     biggest=-1
     for paths,folders,files in os.walk(mydir):
         for f in folders:
@@ -753,9 +792,7 @@ def setup_dir(op):
             
     mydir+="/"+str(biggest+1)
     mkdir(mydir)
-        
-    with open(mydir+"/settings.txt","w") as f:
-        f.write(str(op)+"\n")
+    
     print("Output folder path established")
     return mydir
 
@@ -771,50 +808,61 @@ class TrainOpt(Options):
         
         B          (int)     -- Total batch size (should be Q*K)
         
-        NLOOPS     (int)     -- This saves ram at the cost of more runtime.
+        NLOOPS     (int)     -- Number of loops within the off_diag_labels function. Higher values save ram and
+                                generally makes the code run faster (up to 2x). Note, you can only set this
+                                as high as your effective sequence length. (Take L and divide by your patch size).
         
         steps      (int)     -- Number of training steps
         
         dir        (str)     -- Output directory, set to <NONE> for no output
         
         lr         (float)   -- Learning rate
-        
-        kl         (float)   -- loss term for kl divergence
-        
+                
         sgrad      (bool)    -- whether or not to sample with gradients. 
                                 (Uses less ram when but slightly slower)
+                                
+        true_grad  (bool)    -- Set to false to approximate the gradients
+                                
+        sub_directory (str)  -- String to add to the end of the output directory (inside a subfolder)
         
-        hamiltonian (str)    -- which hamiltonian to use
     """
     def get_defaults(self):
-        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=50000,dir="out",lr=5e-4,kl=0.0,sgrad=False)
+        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=50000,dir="out",lr=5e-4,kl=0.0,sgrad=False,true_grad=False,sub_directory="")
 
+    
+OptionManager.register("train",TrainOpt())
+    
 import sys
-def reg_train(op,to=None,printf=False,mydir=None):
+def reg_train(op,net_optim=None,printf=False,mydir=None):
   try:
+    
+    if "RYDBERG" in op:
+        h = Rydberg(**op["RYDBERG"].__dict__)
+    elif "TFIM" in op:
+        #hope for the best here since there aren't defaults
+        h = TFIM(**op["TFIM"].__dict__)
+    else:        
+        h_opt=Rydberg.DEFAULTS.copy()
+        h_opt.Lx=h_opt.Ly=int(op["TRAIN"].L**0.5)
+        h = Rydberg(**h_opt.__dict__)
+    
+    
     
     if mydir==None:
         mydir = setup_dir(op)
     
-    if type(to)==type(None):
+    
+    op=op["TRAIN"]
+    
+    if op.true_grad:assert op.Q==1
+    
+    if type(net_optim)==type(None):
         net,optimizer=new_rnn_with_optim("GRU",op)
     else:
-        net,optimizer=to
+        net,optimizer=net_optim
 
 
-    if op.hamiltonian=="Rydberg":
-        # Hamiltonian parameters
-        N = op.L   # Total number of atoms
-        V = 7.0     # Strength of Van der Waals interaction
-        Omega = 1.0 # Rabi frequency
-        delta = 1.0 # Detuning 
-        
-        Lx=Ly=int(op.L**0.5)
-        op.L=Lx*Ly
-        h = Rydberg(Lx,Ly,V,Omega,delta)
-    else:
-        #hope for the best here since there aren't defaults
-        h = TFIM(op.L,op.h,op.J)
+
     exact_energy = h.ground()
     print(exact_energy,op.L)
 
@@ -824,36 +872,50 @@ def reg_train(op,to=None,printf=False,mydir=None):
 
     # In[17]:
 
-    samplequeue = torch.zeros([op.B,op.L,1],device=device)
-    sump_queue=torch.zeros([op.B],device=device)
-    sqrtp_queue=torch.zeros([op.B],device=device)
+    #samples
+    samplebatch = torch.zeros([op.B,op.L,1],device=device)
+    #sum of off diagonal labels for each sample (scaled)
+    sump_batch=torch.zeros([op.B],device=device)
+    #scaling factors for the off-diagonal sums
+    sqrtp_batch=torch.zeros([op.B],device=device)
 
-    def fill_queue():
-        for i in range(op.Q):
-            if op.sgrad:
+    def fill_batch():
+        with torch.no_grad():
+            for i in range(op.Q):
                 sample,logp = net.sample(op.K,op.L)
-            else:
-              with torch.no_grad():
-                sample,logp = net.sample(op.K,op.L)
-            sump,sqrtp = net.off_diag_labels_summed(sample,nloops=op.NLOOPS)
-            samplequeue[i*op.K:(i+1)*op.K]=sample
-            sump_queue[i*op.K:(i+1)*op.K]=sump
-            sqrtp_queue[i*op.K:(i+1)*op.K]=sqrtp
+                #get the off diagonal info
+                sump,sqrtp = net.off_diag_labels_summed(sample,nloops=op.NLOOPS)
+                samplebatch[i*op.K:(i+1)*op.K]=sample
+                sump_batch[i*op.K:(i+1)*op.K]=sump
+                sqrtp_batch[i*op.K:(i+1)*op.K]=sqrtp
         return logp
     i=0
     t=time.time()
     for x in range(op.steps):
         
         #gather samples and probabilities
-        logp = fill_queue()
+        
                 
-        # get probability labels for the Q>1 case
-        if op.Q!=1 or not op.sgrad:
-            logp=net.logprobability(samplequeue)
+        if op.Q!=1:
+            fill_batch()
+            logp=net.logprobability(samplebatch)
+        else:
+            if op.sgrad:
+                samplebatch,logp = net.sample(op.B,op.L)
+            else:
+                with torch.no_grad():samplebatch,_= net.sample(op.B,op.L)
+                #if you sample without gradients you have to recompute probabilities with gradients
+                logp=net.logprobability(samplebatch)
+            
+            if op.true_grad:
+                sump_batch,sqrtp_batch = net.off_diag_labels_summed(samplebatch,nloops=op.NLOOPS)
+            else:
+                #don't need gradients on the off diagonal when approximating gradients
+                 with torch.no_grad(): sump_batch,sqrtp_batch = net.off_diag_labels_summed(samplebatch,nloops=op.NLOOPS)
 
         #obtain energy
         with torch.no_grad():
-            E=h.localenergyALT(samplequeue,logp,sump_queue,sqrtp_queue)
+            E=h.localenergyALT(samplebatch,logp,sump_batch,sqrtp_batch)
             #energy mean and variance
             Ev,Eo=torch.var_mean(E)
 	    
@@ -865,10 +927,14 @@ def reg_train(op,to=None,printf=False,mydir=None):
 
         ERR  = Eo/(op.L)
         
-        if op.B==1:
-            loss = ((E-op.kl)*logp).mean()
+        if op.true_grad:
+            #get the extra loss term
+            h_x= h.offDiag *sump_batch* torch.exp(sqrtp_batch-logp/2)
+            loss = (logp*E).mean() + h_x.mean()
+            
         else:
-            loss = (E*logp - (Eo+op.kl)*logp).mean()
+            loss =(logp*(E-Eo)).mean()  if op.B>1 else (logp*E).mean()
+
 
         #Main loss curve to follow
         losses.append(ERR.cpu().item())
