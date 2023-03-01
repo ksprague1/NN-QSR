@@ -30,7 +30,14 @@ def build_model(args):
         for name in options_dict:
             if name in all_models and (not is_lptf or name=="LPTF"):
                 options_dict["TRAIN"] = TrainOpt(L=options_dict[name].L)
-                
+    
+    
+    if options_dict["TRAIN"].seed is None:
+        options_dict["TRAIN"].seed = np.random.randint(65536)
+    
+    torch.manual_seed(options_dict["TRAIN"].seed)
+    np.random.seed(options_dict["TRAIN"].seed)
+        
     HAMILTONIAN = None
     for name in options_dict:
         #make sure system size is consistent among all options

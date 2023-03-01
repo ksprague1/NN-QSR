@@ -795,6 +795,8 @@ class TrainOpt(Options):
         dir        (str)     -- Output directory, set to <NONE> for no output
         
         lr         (float)   -- Learning rate
+        
+        seed       (int)     -- Random seed for the run
                 
         sgrad      (bool)    -- whether or not to sample with gradients. 
                                 (Uses less ram when but slightly slower)
@@ -805,7 +807,7 @@ class TrainOpt(Options):
         
     """
     def get_defaults(self):
-        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,steps=12000,dir="out",lr=5e-4,sgrad=False,true_grad=False,sub_directory="")
+        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,steps=12000,dir="out",lr=5e-4,seed=None,sgrad=False,true_grad=False,sub_directory="")
 
     
 OptionManager.register("train",TrainOpt())
