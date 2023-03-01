@@ -46,6 +46,13 @@ class PTFB(Sampler):
                 nn.Softmax(dim=-1)
             )
         
+        
+        self.tokenize=nn.Sequential(
+                nn.Linear(self.p,Nh[0]),
+                nn.Tanh()
+        )
+        
+        
         self.lin0,self.lin1=self.lin[:2],self.lin[2:]
         
         
@@ -91,7 +98,7 @@ class PTFB(Sampler):
         data[1:]=input[:-1]
         
         #[L//p,B,p] -> [L//p,B,Nh]
-        encoded=self.pe(data)
+        encoded=self.pe(self.tokenize(data))
  
         if h0 is not None:
                         
@@ -172,7 +179,7 @@ class PTFB(Sampler):
             
             #pe should be sequence first [l,B,Nh]
             # multiply by 1 to copy the tensor
-            encoded_input = self.pe(input[:idx,:,:]*1)
+            encoded_input = self.pe(self.tokenize(input[:idx,:,:]*1))
                         
             
             #check out the probability of all 16 vectors
