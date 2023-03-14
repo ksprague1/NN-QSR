@@ -434,7 +434,7 @@ class Patch2D(nn.Module):
             Output:
                 Tensor of shape [B,L]
         """
-        Ly,Lx=self.Ly,self.Lx
+        Ly,Lx=self.Ly,self.Lx 
         # Reversing is done with an index tensor because torch doesn't have an inverse method for unfold
         return x.reshape([x.shape[0],Ly*Lx])[:,self.mixed]
     
@@ -525,9 +525,12 @@ class PRNN(Sampler):
         super(PRNN, self).__init__(device=device)
         if type(patch)==str and len(patch.split("x"))==2:
             px,py = [int(a) for a in patch.split("x")]
-            L=int(L**0.5)
-            self.patch=Patch2D(px,py,L,L)
-            self.L = int(L**2//(px*py))
+            #L=int(L**0.5)
+            #self.patch=Patch2D(px,py,L,L)
+            #self.L = int(L**2//(px*py))
+            Lx,Ly=[int(L**0.5)]*2 if type(L) is int else [int(a) for a in L.split("x")]
+            self.patch=Patch2D(px,py,Lx,Ly)
+            self.L = int(Lx*Ly//(px*py))
             self.p=px*py
         else:
             p=int(patch)
@@ -633,7 +636,7 @@ class PRNN(Sampler):
             #set input to the sample that was actually chosen
             input[:,idx] = sample
         #remove the leading zero in the input    
-        #sample is repeated 16 times at 3rd index so we just take the first one
+        #sample is repeated 16 times at 3rd index so we just take the first one 
         return self.patch.reverse(input[:,1:]).unsqueeze(-1),logp
         
     @torch.jit.export
@@ -865,8 +868,8 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
 
 
 
-    exact_energy = h.ground()
-    print(exact_energy,op.L)
+    #exact_energy = h.ground()
+    #print(exact_energy,op.L)
 
     debug=[]
     losses=[]
@@ -921,7 +924,7 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
             #energy mean and variance
             Ev,Eo=torch.var_mean(E)
 	    
-            MAG, ABS_MAG, SQ_MAG, STAG_MAG  = h.magnetizations(samplequeue)
+            MAG, ABS_MAG, SQ_MAG, STAG_MAG  = h.magnetizations(samplebatch)
             mag_v, mag = torch.var_mean(MAG)
             abs_mag_v, abs_mag = torch.var_mean(ABS_MAG)
             sq_mag_v, sq_mag = torch.var_mean(SQ_MAG)
