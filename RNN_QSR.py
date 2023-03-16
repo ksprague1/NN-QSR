@@ -216,6 +216,28 @@ class Hamiltonian():
         eloc += self.offDiag *sumsqrtp* torch.exp(logsqrtp-logp/2)
 
         return eloc
+    
+    def magnetizations(self, samples):
+        B = samples.shape[0]
+        L = samples.shape[1]
+        mag = torch.zeros(B, device=self.device)
+        abs_mag = torch.zeros(B, device=self.device)
+        sq_mag = torch.zeros(B, device=self.device)
+        stag_mag = torch.zeros(B, device=self.device)
+
+        with torch.no_grad():
+            samples_pm = 2 * samples - 1
+            mag += torch.sum(samples_pm.squeeze(2), axis=1)
+            abs_mag += torch.abs(torch.sum(samples_pm.squeeze(2), axis=1))
+            sq_mag += torch.abs(torch.sum(samples_pm.squeeze(2), axis=1))**2
+            
+            samples_reshape = torch.reshape(samples.squeeze(2), (B, int(np.sqrt(L)), int(np.sqrt(L))))
+            for i in range(int(np.sqrt(L))):
+                for j in range(int(np.sqrt(L))):
+                    stag_mag += (-1)**(i+j) * (samples_reshape[:,i,j] - 0.5)
+
+        return mag, abs_mag, sq_mag, stag_mag / L
+
     def ground(self):
         """Returns the ground state energy E/L"""
         raise NotImplementedError
@@ -412,7 +434,7 @@ class Patch2D(nn.Module):
             Output:
                 Tensor of shape [B,L]
         """
-        Ly,Lx=self.Ly,self.Lx
+        Ly,Lx=self.Ly,self.Lx 
         # Reversing is done with an index tensor because torch doesn't have an inverse method for unfold
         return x.reshape([x.shape[0],Ly*Lx])[:,self.mixed]
     
@@ -503,9 +525,12 @@ class PRNN(Sampler):
         super(PRNN, self).__init__(device=device)
         if type(patch)==str and len(patch.split("x"))==2:
             px,py = [int(a) for a in patch.split("x")]
-            L=int(L**0.5)
-            self.patch=Patch2D(px,py,L,L)
-            self.L = int(L**2//(px*py))
+            #L=int(L**0.5)
+            #self.patch=Patch2D(px,py,L,L)
+            #self.L = int(L**2//(px*py))
+            Lx,Ly=[int(L**0.5)]*2 if type(L) is int else [int(a) for a in L.split("x")]
+            self.patch=Patch2D(px,py,Lx,Ly)
+            self.L = int(Lx*Ly//(px*py))
             self.p=px*py
         else:
             p=int(patch)
@@ -611,7 +636,7 @@ class PRNN(Sampler):
             #set input to the sample that was actually chosen
             input[:,idx] = sample
         #remove the leading zero in the input    
-        #sample is repeated 16 times at 3rd index so we just take the first one
+        #sample is repeated 16 times at 3rd index so we just take the first one 
         return self.patch.reverse(input[:,1:]).unsqueeze(-1),logp
         
     @torch.jit.export
@@ -807,7 +832,7 @@ class TrainOpt(Options):
         
     """
     def get_defaults(self):
-        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,steps=12000,dir="out",lr=5e-4,seed=None,sgrad=False,true_grad=False,sub_directory="")
+        return dict(L=16,Q=1,K=256,B=256,NLOOPS=1,hamiltonian="Rydberg",steps=50000,dir="out",lr=5e-4,kl=0.0,sgrad=False,true_grad=False,sub_directory="")
 
     
 OptionManager.register("train",TrainOpt())
@@ -843,8 +868,8 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
 
 
 
-    exact_energy = h.ground()
-    print(exact_energy,op.L)
+    #exact_energy = h.ground()
+    #print(exact_energy,op.L)
 
     debug=[]
     losses=[]
@@ -898,6 +923,12 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
             E=h.localenergyALT(samplebatch,logp,sump_batch,sqrtp_batch)
             #energy mean and variance
             Ev,Eo=torch.var_mean(E)
+	    
+            MAG, ABS_MAG, SQ_MAG, STAG_MAG  = h.magnetizations(samplebatch)
+            mag_v, mag = torch.var_mean(MAG)
+            abs_mag_v, abs_mag = torch.var_mean(ABS_MAG)
+            sq_mag_v, sq_mag = torch.var_mean(SQ_MAG)
+            stag_mag_v, stag_mag = torch.var_mean(STAG_MAG)
 
         ERR  = Eo/(op.L)
         
@@ -918,8 +949,9 @@ def reg_train(op,net_optim=None,printf=False,mydir=None):
         loss.backward()
         optimizer.step()
 
-        # many repeat values but it keeps the same format as no batch
-        debug+=[[Ev.item()**0.5,Eo.item(),Ev.item()**0.5,Eo.item(),loss.item(),Eo.item(),0,time.time()-t]]
+        # many repeat values but it keeps the same format as no queue
+        #debug+=[[Ev.item()**0.5,Eo.item(),Ev.item()**0.5,Eo.item(),loss.item(),Eo.item(),0,time.time()-t]]
+        debug += [[Eo.item(), Ev.item(), mag.item(), mag_v.item(), abs_mag.item(), abs_mag_v.item(), sq_mag.item(), sq_mag_v.item(), stag_mag.item(), stag_mag_v.item(), time.time()-t]]
 
         if x%500==0:
             print(int(time.time()-t),end=",%.3f|"%(losses[-1]))

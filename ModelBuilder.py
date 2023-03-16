@@ -18,7 +18,6 @@ def build_model(args):
     >>> python ModelBuilder.py --rydberg --train L=576 NLOOPS=64 sub_directory=3x3 --lptf patch=3x3 --rnn L=9 patch=3 Nh=128
     
     """
-    
 
     options_dict = OptionManager.parse_cmd(args)
     is_lptf= ("LPTF" in options_dict)

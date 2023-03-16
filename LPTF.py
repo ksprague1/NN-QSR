@@ -58,7 +58,7 @@ class LPTF(Sampler):
         if type(patch)==str and len(patch.split("x"))==2:
             #patch and system sizes
             px,py = [int(a) for a in patch.split("x")]
-            Lx,Ly=[int(L**0.5)]*2 if type(L) is int else [int(a) for a in L.split("x")]
+            Lx,Ly=[int(L**0.5)]*2 if type(L) is int else [int(a) for a in L.split("x")] 
             #token size and positional encoder
             self.pe = PE2D(Nh, Lx//px,Ly//py,device)
             #patching, sequence length and total patch size
